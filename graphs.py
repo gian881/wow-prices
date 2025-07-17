@@ -176,7 +176,9 @@ def best_day_hour_module(db: DB, items: list[tuple[int, str, int]]):
 
 if __name__ == "__main__":
     db = DB()
-    items = db.con.execute("SELECT id, name, quality FROM items").fetchall()
+    items = db.con.execute(
+        "SELECT id, name, quality FROM items ORDER BY id"
+    ).fetchall()
     while True:
         print("Selecione o serviço que você quer:")
         print("0 - Sair")
