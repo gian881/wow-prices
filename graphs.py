@@ -78,40 +78,26 @@ def show_graph(db: DB, item_id: str, item_name: str) -> None:
 
 
 def get_best_weekday_and_hour(db: DB, item_id: int) -> tuple[str, int, float]:
-    result = db.con.execute(
-        "SELECT strftime('%w', timestamp), strftime('%H', timestamp), price FROM price_history WHERE item_id = ?",
+    return db.con.execute(
+        """SELECT CASE strftime('%w', timestamp)
+                WHEN '0' THEN 'Domingo'
+                WHEN '1' THEN 'Segunda'
+                WHEN '2' THEN 'Terça'
+                WHEN '3' THEN 'Quarta'
+                WHEN '4' THEN 'Quinta'
+                WHEN '5' THEN 'Sexta'
+                WHEN '6' THEN 'Sábado'
+            END AS weekday,
+            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+            AVG(price / 10000.0) AS avg_price
+        FROM price_history
+        WHERE item_id = ?
+        GROUP BY weekday,
+                hour
+        ORDER BY avg_price DESC
+        LIMIT 1;""",
         (item_id,),
-    ).fetchall()
-
-    result = (
-        (weekday(item[0]), int(item[1]), item[2] / 10000) for item in result
-    )
-
-    df = pd.DataFrame(result)
-
-    df.columns = ["weekday", "hour", "price"]
-
-    weekday_order = [
-        "Domingo",
-        "Segunda",
-        "Terça",
-        "Quarta",
-        "Quinta",
-        "Sexta",
-        "Sábado",
-    ]
-    df["weekday"] = pd.Categorical(
-        df["weekday"], categories=weekday_order, ordered=True
-    )
-
-    df = df.groupby(["weekday", "hour"], observed=False)["price"].mean()
-
-    highest_price_item = df.idxmax()
-    highest_price = df.max()
-
-    day, time = highest_price_item
-
-    return (day, time, highest_price)
+    ).fetchall()[0]
 
 
 def graph_module(db: DB):
