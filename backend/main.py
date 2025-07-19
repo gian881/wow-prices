@@ -35,38 +35,6 @@ def process_data(json_result, db: DB):
     items_ids = (
         item[0] for item in db.con.execute("SELECT id FROM items").fetchall()
     )
-    # items_ids = [
-    #     213613,
-    #     213612,
-    #     213611,
-    #     213197,
-    #     210810,
-    #     210809,
-    #     210808,
-    #     210807,
-    #     210806,
-    #     210805,
-    #     210804,
-    #     210803,
-    #     210802,
-    #     210801,
-    #     210800,
-    #     210799,
-    #     210798,
-    #     210797,
-    #     210796,
-    #     210939,
-    #     210938,
-    #     210937,
-    #     210936,
-    #     210935,
-    #     210934,
-    #     210933,
-    #     210932,
-    #     210931,
-    #     210930,
-    #     224828,
-    # ]
     df = (
         pd.json_normalize(json_result["auctions"])
         .query("`item.id` in @items_ids")

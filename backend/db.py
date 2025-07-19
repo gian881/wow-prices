@@ -18,7 +18,7 @@ import sqlite3
 
 class DB:
     def __init__(self) -> None:
-        self.con = sqlite3.connect("test.db")
+        self.con = sqlite3.connect("./data/test.db")
 
     def insert_into_item(
         self, id: int, name: str, image_path: str, quality: int | None = None
