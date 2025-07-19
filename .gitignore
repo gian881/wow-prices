@@ -206,6 +206,7 @@ __marimo__/
 images/
 
 # Local development files
+data/
 *.db
 token.json
 
