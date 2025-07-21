@@ -16,7 +16,13 @@
 
   --color-accent: #7632a4;
 
-  --container-8xl: 86rem;
+  --color-common: ##ffffff;
+  --color-uncommon: #1eff00;
+  --color-rare: #0070dd;
+  --color-epic: #a335ee;
+  --color-legendary: #ff8000;
+  --color-artifact: #e6cc80;
+  --color-token: #00ccff;
 
   --font-title: Junicode, serif;
   --default-font-family: Poppins, sans-serif;
