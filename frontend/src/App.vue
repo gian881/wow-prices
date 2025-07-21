@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
+import NavBar from './components/NavBar.vue'
 </script>
 
 <template>
-  <RouterView />
+  <div class="container mx-auto">
+    <NavBar />
+    <RouterView class="" />
+  </div>
 </template>

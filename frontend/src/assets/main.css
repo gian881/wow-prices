@@ -1,1 +1,30 @@
 @import 'tailwindcss';
+
+@layer base {
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@theme {
+  --color-midnight-dark: #121015;
+  --color-midnight-light-100: #322d3a;
+  --color-midnight-light-200: #1b1a1e;
+
+  --color-light-yellow: #fff7e1;
+
+  --color-accent: #7632a4;
+
+  --container-8xl: 86rem;
+
+  --font-title: Junicode, serif;
+  --default-font-family: Poppins, sans-serif;
+}
+
+.button-shadow {
+  box-shadow:
+    -2px -2px 2px 0px rgba(0, 0, 0, 0.12) inset,
+    2px 2px 2px 0px rgba(255, 255, 255, 0.12) inset,
+    2px 2px 4px 0px #160e1b;
+}
