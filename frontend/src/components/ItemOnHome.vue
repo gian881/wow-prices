@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
+import ItemImage from './ItemImage.vue'
 
 defineProps<{
   id: number
@@ -13,28 +14,18 @@ defineProps<{
   rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
   image: string
 }>()
-
-const rarityColors = {
-  COMMON: 'border-common',
-  UNCOMMON: 'border-uncommon',
-  RARE: 'border-rare',
-  EPIC: 'border-epic',
-  LEGENDARY: 'border-legendary',
-  ARTIFACT: 'border-artifact',
-  TOKEN: 'border-token',
-}
 </script>
 <template>
   <router-link
     :to="`/item/${id}`"
-    class="flex max-w-[264px] gap-3 rounded p-2 transition-colors hover:bg-white/5"
+    class="flex gap-3 rounded-lg p-2 transition-colors duration-500 hover:bg-white/5"
   >
-    <img :src="image" :alt="name" :class="`${rarityColors[rarity]} h-16 w-16 rounded border-2`" />
-    <div class="flex flex-col items-start justify-between">
-      <p class="overflow-hidden text-2xl font-semibold text-ellipsis whitespace-nowrap">
+    <item-image :name="name" :quality="quality" :rarity="rarity" :image="image" size="sm" />
+    <div class="flex min-w-0 flex-col items-start justify-between">
+      <p class="w-full overflow-hidden text-2xl font-semibold text-ellipsis whitespace-nowrap">
         {{ name }}
       </p>
-      <div class="text-light-yellow flex items-center gap-1.5">
+      <div class="text-light-yellow flex items-center gap-1.5 font-medium">
         <div class="flex items-center gap-0.5">
           <p>{{ price.gold }}</p>
           <img :src="goldImage" alt="" class="h-4 w-4" />
