@@ -1,16 +1,17 @@
 import json
 import os
-import shutil
 import sqlite3
 
+import httpx
 import pandas as pd
-import requests
+from PIL import Image
+from io import BytesIO
 from bs4 import BeautifulSoup, Tag
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from utils import generate_new_token, get_auth_token
+from blizzard_api import fetch_blizzard_api
 
 app = FastAPI()
 
@@ -28,19 +29,31 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-def download_image(url: str, file_path: str):
+def get_db():
+    conn = sqlite3.connect("./data/test.db")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+async def get_http_client():
+    async with httpx.AsyncClient() as client:
+        yield client
+
+
+async def download_image(client: httpx.AsyncClient, url: str, file_path: str):
     if os.path.exists(file_path):
         return
-    img = requests.get(url, stream=True)
+    img_response = await client.get(url)
 
-    if img.status_code == 200:
-        with open(file_path, "wb") as file:
-            img.raw.decode_content = True
-            shutil.copyfileobj(img.raw, file)
+    if img_response.status_code == 200:
+        img = Image.open(BytesIO(img_response.content))
+        img.save(file_path)
 
 
-def get_item_quality(item_id: int) -> int:
-    response = requests.get(f"https://www.wowhead.com/item={item_id}")
+async def get_item_quality(item_id: int, client: httpx.AsyncClient) -> int:
+    response = await client.get(f"https://www.wowhead.com/item={item_id}")
     soup = BeautifulSoup(response.content, "html.parser")
     script = soup.find("script", {"id": "data.page.wow.item.contextNames"})
 
@@ -54,19 +67,6 @@ def get_item_quality(item_id: int) -> int:
             if "tier1.png" in script_text:
                 return 1
     return 0
-
-
-def get_db():
-    conn = sqlite3.connect("./data/test.db")
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
 
 
 def weekday(index: str) -> str:
@@ -136,59 +136,41 @@ def get_items(request: Request, db: sqlite3.Connection = Depends(get_db)):
 
 
 @app.post("/items/{item_id}", status_code=201)
-def add_item(item_id: int, db: sqlite3.Connection = Depends(get_db)):
+async def add_item(
+    item_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    client: httpx.AsyncClient = Depends(get_http_client),
+):
     result = db.execute(
         "SELECT * FROM items WHERE id = ?", (item_id,)
     ).fetchone()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
     try:
-        response = requests.get(
+        item_response = await fetch_blizzard_api(
             f"https://us.api.blizzard.com/data/wow/item/{item_id}",
-            params={"namespace": "static-us", "locale": "pt_BR"},
-            headers={"Authorization": f"Bearer {get_auth_token()}"},
+            client,
+            {"namespace": "static-us", "locale": "pt_BR"},
+            "Item",
         )
 
-        if response.status_code == 401:
-            generate_new_token()
-            response = requests.get(
-                f"https://us.api.blizzard.com/data/wow/item/{item_id}",
-                params={"namespace": "static-us", "locale": "pt_BR"},
-                headers={"Authorization": f"Bearer {get_auth_token()}"},
-            )
-        if response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Item não encontrado")
-
-        item_json = response.json()
-        item = {
-            "id": item_id,
-            "name": item_json["name"],
-            "image_path": "",
-            "quality": 0,
-            "rarity": item_json["quality"]["type"],
-        }
-
-        img_response = requests.get(
-            item_json["media"]["key"]["href"],
-            headers={"Authorization": f"Bearer {get_auth_token()}"},
+        img_response = await fetch_blizzard_api(
+            item_response["media"]["key"]["href"],
+            client,
         )
 
-        if img_response.status_code == 401:
-            generate_new_token()
-            img_response = requests.get(
-                item_json["media"]["key"]["href"],
-                headers={"Authorization": f"Bearer {get_auth_token()}"},
-            )
-
-        img_response_json = img_response.json()
-
-        img_url = img_response_json["assets"][0]["value"]
+        img_url = img_response["assets"][0]["value"]
         img_path = os.path.join("static", "images", img_url.split("/")[-1])
 
-        download_image(img_url, img_path)
+        await download_image(client, img_url, img_path)
 
-        item["image_path"] = img_path.replace("\\", "/")
-        item["quality"] = get_item_quality(item_id)
+        item = {
+            "id": item_id,
+            "name": item_response["name"],
+            "image_path": img_path.replace("\\", "/"),
+            "quality": await get_item_quality(item_id, client),
+            "rarity": item_response["quality"]["type"],
+        }
 
         db.execute(
             "INSERT INTO items VALUES (:id, :name, :image_path, :quality, :rarity)",
@@ -198,8 +180,16 @@ def add_item(item_id: int, db: sqlite3.Connection = Depends(get_db)):
 
         return item
 
-    except Exception as e:
-        print(e)
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Erro ao se comunicar com a API externa: {e}",
+        )
+    except (KeyError, IndexError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Resposta inesperada da API da Blizzard: {e}",
+        )
 
 
 @app.get("/items/{item_id}")

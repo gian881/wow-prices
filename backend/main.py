@@ -1,10 +1,13 @@
-from datetime import datetime
+import sqlite3
 import time
+from datetime import datetime
+
+from fastapi import HTTPException
+import httpx
 import pandas as pd
 import requests
 
-from db import DB
-from utils import generate_new_token, get_auth_token
+from blizzard_api import fetch_blizzard_api
 
 
 def log(message: str) -> None:
@@ -12,28 +15,26 @@ def log(message: str) -> None:
     print(f"{now.strftime('[%d/%m/%Y] [%H:%M:%S]')} {message}")
 
 
-def get_data():
+async def get_data(httpx_client: httpx.AsyncClient):
     log("Getting new data.")
-    res = requests.get(
-        "https://us.api.blizzard.com/data/wow/auctions/commodities?namespace=dynamic-us&locale=en_US",
-        headers={"Authorization": f"Bearer {get_auth_token()}"},
-    )
 
-    if res.status_code == 401:
-        log("Token expired, generating new token.")
-        generate_new_token()
-        return get_data()
+    try:
+        data = await fetch_blizzard_api(
+            "https://us.api.blizzard.com/data/wow/auctions/commodities",
+            httpx_client,
+            params={"namespace": "dynamic-us", "locale": "pt_BR"},
+        )
 
-    if res.ok:
-        result = res.json()
-        return result
-    raise Exception("Não foi possível fazer o request.")
+        return data
+    except HTTPException as e:
+        print("Erro ao carregar dados da blizzard")
+        print(e)
 
 
-def process_data(json_result, db: DB):
+def process_data(json_result, db_conn: sqlite3.Connection):
     log("Processing the new data")
     items_ids = (
-        item[0] for item in db.con.execute("SELECT id FROM items").fetchall()
+        item[0] for item in db_conn.execute("SELECT id FROM items").fetchall()
     )
     df = (
         pd.json_normalize(json_result["auctions"])
@@ -41,27 +42,34 @@ def process_data(json_result, db: DB):
         .rename(columns={"item.id": "item_id", "unit_price": "price"})
     )
 
-    df.drop(columns=["id", "time_left"], inplace=True)
-
     df = df[["item_id", "quantity", "price"]]
 
     df = df.groupby(["item_id", "price"])["quantity"].sum().reset_index()
 
     df = df[df["quantity"] >= 100]
 
-    df = df.groupby("item_id")["price"].min().reset_index()
+    if not df.empty:
+        df = (
+            df.groupby("item_id")
+            .agg(price=("price", "min"), quantity=("quantity", "sum"))
+            .reset_index()
+        )
 
-    df["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        df["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-    log("Saving the new data to the DB")
-    df.to_sql("price_history", con=db.con, if_exists="append", index=False)
+        log("Saving the new data to the DB")
+        df.to_sql("price_history", con=db_conn, if_exists="append", index=False)
+    else:
+        log("No data to save after filtering.")
 
 
 def main() -> None:
     log("Initializing.")
-    db = DB()
+    db_conn = sqlite3.connect("./data/test.db")
+    client = httpx.AsyncClient()
+
     while True:
-        res = db.con.execute(
+        res = db_conn.execute(
             """SELECT timestamp FROM price_history ORDER BY timestamp DESC LIMIT 1"""
         )
 
@@ -72,8 +80,8 @@ def main() -> None:
         time_diff = datetime.now() - last_timestamp
         if time_diff.total_seconds() > 3600:
             log("It's been more than one hour, getting new data.")
-            data = get_data()
-            process_data(data, db)
+            data = get_data(client)
+            process_data(data, db_conn)
             time.sleep(60 * 60)  # 60 minutos * 60 segundos
         else:
             time.sleep(1 * 60)  # 1 minuto * 60 segundos
