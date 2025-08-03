@@ -10,9 +10,12 @@
 @theme {
   --color-midnight-dark: #121015;
   --color-midnight-light-100: #322d3a;
+  --color-midnight-light-150: #29272d;
   --color-midnight-light-200: #1b1a1e;
 
   --color-light-yellow: #fff7e1;
+  --color-light-yellow-100: #fff7e1;
+  --color-light-yellow-200: #aca9a1;
 
   --color-accent: #7632a4;
 
@@ -29,8 +32,21 @@
 }
 
 .button-shadow {
+  transition: box-shadow 300ms ease-in-out;
   box-shadow:
     -2px -2px 2px 0px rgba(0, 0, 0, 0.12) inset,
     2px 2px 2px 0px rgba(255, 255, 255, 0.12) inset,
     2px 2px 4px 0px #160e1b;
+}
+
+.button-shadow:hover {
+  box-shadow:
+    -2px -2px 2px 0 rgba(0, 0, 0, 0.08) inset,
+    2px 2px 2px 0 rgba(255, 255, 255, 0.08) inset;
+}
+
+.button-shadow:active {
+  box-shadow:
+    -2px -2px 2px 0 rgba(0, 0, 0, 0.15) inset,
+    2px 2px 2px 0 rgba(0, 0, 0, 0.15) inset;
 }
