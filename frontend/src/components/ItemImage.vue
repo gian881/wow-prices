@@ -9,7 +9,7 @@ const { quality, size } = defineProps<{
   quality: number
   rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
   image: string
-  size: 'sm' | 'md'
+  size: 'xs' | 'sm' | 'md'
 }>()
 
 const rarityColors = {
@@ -38,12 +38,16 @@ const tierImage = computed(() => {
 const tierImageClass = computed(() => {
   switch (quality) {
     case 1:
+      if (size === 'xs') return 'w-[16px] h-[17px] -left-[7px] -top-[7px]'
       if (size === 'md') return 'w-[31px] h-[34px] -left-[13px] -top-[15px]'
       if (size === 'sm') return 'w-[25px] h-[27px] -left-[10px] -top-[12px]'
+
     case 2:
+      if (size === 'xs') return 'w-[23px] h-[17px] -left-[8px] -top-[8px]'
       if (size === 'md') return 'w-[46px] h-[34px] -left-[14px] -top-[16px]'
       if (size === 'sm') return 'w-[37px] h-[27px] -left-[9px] -top-[13px]'
     case 3:
+      if (size === 'xs') return 'w-[19px] h-[18px] -left-[7px] -top-[6px]'
       if (size === 'md') return 'w-[38px] h-[35px] -left-[13px] -top-[15px]'
       if (size === 'sm') return 'w-[30px] h-[28px] -left-[9px] -top-[12px]'
     default:
@@ -53,6 +57,8 @@ const tierImageClass = computed(() => {
 
 const sizeClass = computed(() => {
   switch (size) {
+    case 'xs':
+      return 'h-10 w-10'
     case 'sm':
       return 'h-16 w-16'
     case 'md':

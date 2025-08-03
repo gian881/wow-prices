@@ -18,9 +18,40 @@ const item = ref<{
     gold: number
     silver: number
   }
+  averagePriceData: {
+    x: string[]
+    y: string[]
+    z: number[][]
+  }
+  averageQuantityData: {
+    x: string[]
+    y: string[]
+    z: number[][]
+  }
+  lastWeekData: {
+    price: {
+      x: string[]
+      y: number[]
+    }
+    quantity: {
+      x: string[]
+      y: number[]
+    }
+  }
   lastTimeStamp: string
-  //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  averagePriceData: any
+  selling: {
+    weekday: string
+    hour: number
+    price: {
+      gold: number
+      silver: number
+    }
+    priceDiff: {
+      sign: string
+      gold: number
+      silver: number
+    }
+  }
 } | null>()
 
 const loading = ref(false)
@@ -35,8 +66,78 @@ watch(
 watch(item, (newItem) => {
   if (newItem && newItem.averagePriceData) {
     nextTick(() => {
+      Plotly.purge('priceChartDiv')
+      Plotly.purge('quantityChartDiv')
+      Plotly.purge('lastWeekChartDiv')
+
+      console.log(newItem.lastWeekData)
+
       Plotly.newPlot(
-        'chartDiv',
+        'lastWeekChartDiv',
+        [
+          {
+            ...newItem.lastWeekData.price,
+            hovertemplate: '%{x}<br>Preço: <b>%{y:.2f}</b><extra></extra>',
+            type: 'scatter',
+            name: 'Preço',
+            line: { color: '#783F99' },
+          },
+          {
+            ...newItem.lastWeekData.quantity,
+            hovertemplate: '%{x}<br>Quantidade: <b>%{y}</b><extra></extra>',
+            type: 'scatter',
+            name: 'Quantidade',
+            yaxis: 'y2',
+            line: { color: '#52B3A0' },
+          },
+        ],
+        {
+          title: { text: 'Histórico de preço e quantidade' },
+          font: {
+            color: 'white',
+            family: 'Poppins, sans-serif',
+            size: 16,
+          },
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          legend: {
+            orientation: 'h',
+            x: -0.03,
+            y: 1.15,
+          },
+
+          yaxis: {
+            gridcolor: '#333',
+            title: { text: 'Preço' },
+            color: '#783F99',
+            tickfont: { family: 'Poppins, sans-serif', size: 14 },
+          },
+
+          yaxis2: {
+            title: { text: 'Quantidade' },
+            overlaying: 'y',
+            side: 'right',
+            color: '#52B3A0',
+            gridcolor: '#333',
+            tickfont: { family: 'Poppins, sans-serif', size: 14 },
+          },
+
+          xaxis: {
+            title: { text: 'Data e Hora' },
+            type: 'date',
+            tickformat: '%a %d/%m às %H:%M',
+            gridcolor: '#444',
+            tickfont: { family: 'Poppins, sans-serif', size: 14 },
+          },
+
+          hovermode: 'x',
+          hoverlabel: {
+            font: { family: 'Poppins, sans-serif', size: 14 },
+          },
+        },
+      )
+      Plotly.newPlot(
+        'priceChartDiv',
         [
           {
             ...newItem.averagePriceData,
@@ -52,6 +153,48 @@ watch(item, (newItem) => {
         ],
         {
           title: { text: 'Preço pelo dia da semana e hora' },
+          width: 1000,
+          height: 950,
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          font: {
+            color: 'white',
+            family: 'Poppins, sans-serif',
+            size: 16,
+          },
+          xaxis: {
+            title: { text: 'Dia da Semana' },
+            side: 'bottom',
+            showgrid: false,
+          },
+          yaxis: {
+            title: { text: 'Hora do dia' },
+            autorange: 'reversed',
+            showgrid: false,
+          },
+        },
+        {
+          responsive: true,
+        },
+      )
+
+      Plotly.newPlot(
+        'quantityChartDiv',
+        [
+          {
+            ...newItem.averageQuantityData,
+            type: 'heatmap',
+            colorscale: customColorScale,
+            texttemplate: '%{z:.2f}',
+            text: newItem.averageQuantityData.z,
+            textfont: { family: 'Poppins, sans-serif', size: 14 },
+            xgap: 1.5,
+            ygap: 1.5,
+            hovertemplate: '<b>%{x}, %{y}</b><br>Quantidade: %{z:.2f}<extra></extra>',
+          },
+        ],
+        {
+          title: { text: 'Quantidade pelo dia da semana e hora' },
           width: 1000,
           height: 950,
           paper_bgcolor: 'transparent',
@@ -117,14 +260,35 @@ async function fetchItem(id: string | string[]) {
       ></item-image>
       <div class="flex flex-col justify-between">
         <h1 class="text-3xl font-semibold">{{ item.name }}</h1>
-        <div class="text-light-yellow flex items-center gap-1.5 text-xl font-medium">
-          <div class="flex items-center gap-0.5">
-            <p>{{ item.currentPrice.gold }}</p>
-            <img :src="goldImage" alt="" class="h-5 w-5" />
+        <p>
+          Melhor dia de venda:
+          <span class="font-bold"> {{ item.selling.weekday }}</span>
+        </p>
+        <div class="text-light-yellow flex items-center gap-2">
+          <div class="flex items-center gap-1.5 text-xl font-medium">
+            <div class="flex items-center gap-0.5">
+              <p>{{ item.currentPrice.gold }}</p>
+              <img :src="goldImage" alt="" class="h-5 w-5" />
+            </div>
+            <div class="flex items-center gap-0.5">
+              <p>{{ item.currentPrice.silver }}</p>
+              <img :src="silverImage" alt="" class="h-5 w-5" />
+            </div>
           </div>
-          <div class="flex items-center gap-0.5">
-            <p>{{ item.currentPrice.silver }}</p>
-            <img :src="silverImage" alt="" class="h-5 w-5" />
+          <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-0.5">
+              <p>({{ item.selling.priceDiff.gold }}</p>
+              <img :src="goldImage" alt="" class="h-4 w-4" />
+            </div>
+            <div class="flex items-center gap-0.5">
+              <p>{{ item.selling.priceDiff.silver }}</p>
+              <img :src="silverImage" alt="" class="h-4 w-4" />
+            </div>
+            <span
+              :class="`font-semibold ${item?.selling.priceDiff.sign === 'negative' ? 'text-red-500' : 'text-green-500'}`"
+              >{{ item?.selling.priceDiff.sign === 'negative' ? 'abaixo' : 'acima' }}</span
+            >
+            do preço "ideal")
           </div>
         </div>
       </div>
@@ -141,8 +305,21 @@ async function fetchItem(id: string | string[]) {
     </div>
   </div>
 
+  <h2 class="font-title mt-8 text-3xl font-bold">Histórico de preços</h2>
+
+  <div class="bg-midnight-light-200 mt-2 rounded-lg p-2">
+    <div id="lastWeekChartDiv" class="my-chart-div"></div>
+  </div>
+
   <h2 class="font-title mt-8 text-3xl font-bold">Heatmap de preços</h2>
-  <div id="chartDiv" class="my-chart-div"></div>
+  <div class="bg-midnight-light-200 mt-2 rounded-lg p-2">
+    <div id="priceChartDiv" class="my-chart-div"></div>
+  </div>
+
+  <h2 class="font-title mt-8 text-3xl font-bold">Heatmap de quantidade</h2>
+  <div class="bg-midnight-light-200 mt-2 rounded-lg p-2">
+    <div id="quantityChartDiv" class="my-chart-div"></div>
+  </div>
 </template>
 
 <style scoped>

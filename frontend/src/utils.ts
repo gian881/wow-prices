@@ -278,3 +278,11 @@ export function getRelativeTime(dateString: string): string {
     return rtf.format(diffDays, 'day')
   }
 }
+
+export function getTodayWeekdayIndex(): number {
+  const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+  const currentWeekday = new Date()
+    .toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'long' })
+    .toLowerCase()
+  return weekdays.indexOf(currentWeekday)
+}

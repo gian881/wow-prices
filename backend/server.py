@@ -1,17 +1,23 @@
+import datetime
+import itertools
 import json
 import os
 import sqlite3
+from io import BytesIO
 
 import httpx
 import pandas as pd
-from PIL import Image
-from io import BytesIO
 from bs4 import BeautifulSoup, Tag
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
+from unidecode import unidecode
 
+# from sqlmodel import Field, SQLModel
 from blizzard_api import fetch_blizzard_api
+from models import ItemOptionalsCreate
+from utils import price_to_gold_and_silver
 
 app = FastAPI()
 
@@ -29,8 +35,23 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+# class Item(SQLModel, table=True):
+#     id: int = Field(primary_key=True)
+#     name: str
+#     image_path: str
+#     quality: int
+#     rarity: str
+
+
+# class PriceHistory(SQLModel, table=True):
+#     item_id: int = Field(primary_key=True, foreign_key="items.id")
+#     price: int
+#     quantity: int
+#     timestamp: str = Field(primary_key=True)
+
+
 def get_db():
-    conn = sqlite3.connect("./data/test.db")
+    conn = sqlite3.connect("./data/test.db", check_same_thread=False)
     try:
         yield conn
     finally:
@@ -69,27 +90,182 @@ async def get_item_quality(item_id: int, client: httpx.AsyncClient) -> int:
     return 0
 
 
-def weekday(index: str) -> str:
-    if index == "0":
-        return "Domingo"
-    if index == "1":
-        return "Segunda"
-    if index == "2":
-        return "Terça"
-    if index == "3":
-        return "Quarta"
-    if index == "4":
-        return "Quinta"
-    if index == "5":
-        return "Sexta"
-    if index == "6":
-        return "Sábado"
-    return "Domingo"
+def get_plotly_heatmap_data(
+    raw_data: list[tuple[str, int, float]], column_name: str
+):
+    weekday_order = [
+        "Domingo",
+        "Segunda",
+        "Terça",
+        "Quarta",
+        "Quinta",
+        "Sexta",
+        "Sábado",
+    ]
+
+    heatmap_df = pd.DataFrame(
+        raw_data, columns=["weekday", "hour", column_name]
+    )
+
+    heatmap_df["weekday"] = pd.Categorical(
+        heatmap_df["weekday"], categories=weekday_order, ordered=True
+    )
+    heatmap_df = heatmap_df.set_index(["weekday", "hour"])
+    heatmap_data = heatmap_df[column_name].unstack(level="weekday").sort_index()
+
+    heatmap_data_json = json.loads(heatmap_data.to_json(orient="split"))
+    return {
+        "x": heatmap_data_json["columns"],
+        "y": [f"{str(hour).zfill(2)}h" for hour in heatmap_data_json["index"]],
+        "z": heatmap_data_json["data"],
+    }
 
 
-@app.get("/items/")
-def get_items(request: Request, db: sqlite3.Connection = Depends(get_db)):
-    result = db.execute(
+@app.get("/items/week")
+def get_week_items(
+    request: Request, db_conn: sqlite3.Connection = Depends(get_db)
+):
+    results = db_conn.execute("""
+    WITH AggregatedHistory AS (    
+        SELECT 
+            item_id,
+            strftime('%w', timestamp) AS weekday_num,
+            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+            AVG(price) AS avg_price
+        FROM price_history
+        GROUP BY item_id, weekday_num, hour
+    ),
+
+    RankedHistory AS (
+        SELECT *,
+            ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY avg_price DESC) AS rn
+        FROM AggregatedHistory
+    )
+
+    SELECT
+        i.id, -- 0
+        i.name, -- 1
+        i.quality, -- 2
+        i.image_path, -- 3
+        i.rarity, -- 4
+        CASE rp.weekday_num
+            WHEN '0' THEN 'Domingo'
+            WHEN '1' THEN 'Segunda'
+            WHEN '2' THEN 'Terça'
+            WHEN '3' THEN 'Quarta'
+            WHEN '4' THEN 'Quinta'
+            WHEN '5' THEN 'Sexta'
+            ELSE 'Sábado'
+        END AS weekday, -- 5
+        rp.hour, -- 6
+        rp.avg_price / 10000 AS gold, -- 7
+        (rp.avg_price % 10000) / 100 AS silver -- 8
+    FROM RankedHistory rp
+    JOIN items i ON i.id = rp.item_id
+    WHERE rp.rn = 1
+    ORDER BY rp.weekday_num, rp.hour""").fetchall()
+
+    return [
+        {
+            "weekday": unidecode(weekday.lower()),
+            "hours": [
+                {
+                    "hour": f"{hour}:00",
+                    "items": [
+                        {
+                            "id": item[0],
+                            "name": item[1],
+                            "price": {
+                                "gold": int(item[7]),
+                                "silver": int(item[8]),
+                            },
+                            "quality": item[2],
+                            "rarity": item[4],
+                            "image": f"{request.base_url}{item[3]}",
+                        }
+                        for item in items
+                    ],
+                }
+                for hour, items in itertools.groupby(hour_items, lambda x: x[6])
+            ],
+        }
+        for weekday, hour_items in itertools.groupby(results, lambda x: x[5])
+    ]
+
+
+@app.get("/items/today")
+def get_today_items(
+    request: Request, db_conn: sqlite3.Connection = Depends(get_db)
+):
+    today_weekday = (
+        datetime.datetime.now().weekday() + 1
+    ) % 7  # Deixando weekday igual ao do SQL
+    results = db_conn.execute(
+        """
+    WITH AggregatedHistory AS (    
+        SELECT 
+            item_id,
+            strftime('%w', timestamp) AS weekday_num,
+            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+            AVG(price) AS avg_price
+        FROM price_history
+        GROUP BY item_id, weekday_num, hour
+    ),
+
+    RankedHistory AS (
+        SELECT *,
+            ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY avg_price DESC) AS rn
+        FROM AggregatedHistory
+    )
+
+    SELECT
+        i.id, -- 0
+        i.name, -- 1
+        i.quality, -- 2
+        i.image_path, -- 3
+        i.rarity, -- 4
+        CASE rp.weekday_num
+            WHEN '0' THEN 'Domingo'
+            WHEN '1' THEN 'Segunda'
+            WHEN '2' THEN 'Terça'
+            WHEN '3' THEN 'Quarta'
+            WHEN '4' THEN 'Quinta'
+            WHEN '5' THEN 'Sexta'
+            ELSE 'Sábado'
+        END AS weekday, -- 5
+        rp.hour, -- 6
+        rp.avg_price / 10000 AS gold, -- 7
+        (rp.avg_price % 10000) / 100 AS silver -- 8
+    FROM RankedHistory rp
+    JOIN items i ON i.id = rp.item_id
+    WHERE rp.rn = 1 AND CAST (rp.weekday_num AS INTEGER) = ?
+    ORDER BY rp.hour
+    """,
+        (today_weekday,),
+    ).fetchall()
+
+    return [
+        {
+            "hour": f"{str(hour).zfill(2)}:00",
+            "items": [
+                {
+                    "id": item[0],
+                    "name": item[1],
+                    "price": {"gold": int(item[7]), "silver": int(item[8])},
+                    "quality": item[2],
+                    "rarity": item[4],
+                    "image": f"{request.base_url}{item[3]}",
+                }
+                for item in items
+            ],
+        }
+        for hour, items in itertools.groupby(results, key=lambda x: x[6])
+    ]
+
+
+@app.get("/items")
+def get_items(request: Request, db_conn: sqlite3.Connection = Depends(get_db)):
+    result = db_conn.execute(
         """WITH latest_prices AS (
                 SELECT
                     item_id,
@@ -138,10 +314,11 @@ def get_items(request: Request, db: sqlite3.Connection = Depends(get_db)):
 @app.post("/items/{item_id}", status_code=201)
 async def add_item(
     item_id: int,
-    db: sqlite3.Connection = Depends(get_db),
+    item_optionals: ItemOptionalsCreate,
+    db_conn: sqlite3.Connection = Depends(get_db),
     client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    result = db.execute(
+    result = db_conn.execute(
         "SELECT * FROM items WHERE id = ?", (item_id,)
     ).fetchone()
     if result is not None:
@@ -170,13 +347,14 @@ async def add_item(
             "image_path": img_path.replace("\\", "/"),
             "quality": await get_item_quality(item_id, client),
             "rarity": item_response["quality"]["type"],
+            "quantity_threshold": item_optionals.quantity_threshold,
         }
 
-        db.execute(
-            "INSERT INTO items VALUES (:id, :name, :image_path, :quality, :rarity)",
+        db_conn.execute(
+            "INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold) VALUES (:id, :name, :image_path, :quality, :rarity, :quantity_threshold)",
             item,
         )
-        db.commit()
+        db_conn.commit()
 
         return item
 
@@ -194,17 +372,19 @@ async def add_item(
 
 @app.get("/items/{item_id}")
 def get_item(
-    item_id: int, request: Request, db: sqlite3.Connection = Depends(get_db)
+    item_id: int,
+    request: Request,
+    db_conn: sqlite3.Connection = Depends(get_db),
 ):
-    name, image_path, quality, price, quantity, timestamp, rarity = db.execute(
+    item_details = db_conn.execute(
         """SELECT
                 i.name,
                 i.image_path,
                 i.quality,
+                i.rarity,
                 ph.price,
                 ph.quantity,
-                ph.timestamp,
-                i.rarity
+                ph.timestamp
             FROM
                 items AS i
             JOIN
@@ -218,39 +398,139 @@ def get_item(
         (item_id,),
     ).fetchone()
 
-    gold = int(price / 10000)
-    silver = int((price / 10000 - gold) * 100)
+    if not item_details:
+        raise HTTPException(status_code=404, detail="Item não encontrado")
 
-    result = db.execute(
-        "SELECT strftime('%w', timestamp), strftime('%H', timestamp), price FROM price_history WHERE item_id = ?",
+    (
+        name,
+        image_path,
+        quality,
+        rarity,
+        price,
+        quantity,
+        timestamp,
+    ) = item_details
+
+    price_heatmap_raw_data = db_conn.execute(
+        """
+        SELECT
+            CASE strftime('%w', timestamp)
+                WHEN '0' THEN 'Domingo'
+                WHEN '1' THEN 'Segunda'
+                WHEN '2' THEN 'Terça'
+                WHEN '3' THEN 'Quarta'
+                WHEN '4' THEN 'Quinta'
+                WHEN '5' THEN 'Sexta'
+                WHEN '6' THEN 'Sábado'
+            END AS weekday,
+            CAST (strftime('%H', timestamp) AS INTEGER) AS hour,
+            AVG(price) / 10000.0 AS avg_price
+        FROM price_history
+        WHERE item_id = ?
+        GROUP BY weekday, hour
+        ORDER BY strftime('%w', timestamp), hour;""",
         (item_id,),
     ).fetchall()
 
-    result = (
-        (weekday(item[0]), int(item[1]), item[2] / 10000) for item in result
+    plotly_price_heatmap_data = get_plotly_heatmap_data(
+        price_heatmap_raw_data, "price"
     )
-    df = pd.DataFrame(result)
-    df.columns = ["weekday", "hour", "price"]
-    weekday_order = [
-        "Domingo",
-        "Segunda",
-        "Terça",
-        "Quarta",
-        "Quinta",
-        "Sexta",
-        "Sábado",
-    ]
-    df["weekday"] = pd.Categorical(
-        df["weekday"], categories=weekday_order, ordered=True
+
+    quantity_heatmap_raw_data = db_conn.execute(
+        """
+        SELECT
+            CASE strftime('%w', timestamp)
+                WHEN '0' THEN 'Domingo'
+                WHEN '1' THEN 'Segunda'
+                WHEN '2' THEN 'Terça'
+                WHEN '3' THEN 'Quarta'
+                WHEN '4' THEN 'Quinta'
+                WHEN '5' THEN 'Sexta'
+                WHEN '6' THEN 'Sábado'
+            END AS weekday,
+            CAST (strftime('%H', timestamp) AS INTEGER) AS hour,
+            AVG(quantity) AS avg_quantity
+        FROM price_history
+        WHERE item_id = ?
+        GROUP BY weekday, hour
+        ORDER BY strftime('%w', timestamp), hour;""",
+        (item_id,),
+    ).fetchall()
+
+    plotly_quantity_heatmap_data = get_plotly_heatmap_data(
+        quantity_heatmap_raw_data, "quantity"
     )
-    df = df.groupby(["weekday", "hour"], observed=False)["price"].mean()
-    heatmap_data = df.unstack(level="weekday")
-    out = heatmap_data.to_json(orient="split")
-    json_out = json.loads(out)
-    ploty_heatmap_data = {
-        "x": json_out["columns"],
-        "y": [str(hour).zfill(2) + "h" for hour in json_out["index"]],
-        "z": json_out["data"],
+
+    selling_data = db_conn.execute(
+        """
+        SELECT
+            -- 1. Formata os dados para ficarem legíveis
+            CASE strftime('%w', timestamp)
+                WHEN '0' THEN 'Domingo'
+                WHEN '1' THEN 'Segunda'
+                WHEN '2' THEN 'Terça'
+                WHEN '3' THEN 'Quarta'
+                WHEN '4' THEN 'Quinta'
+                WHEN '5' THEN 'Sexta'
+                ELSE 'Sábado'
+            END AS weekday,
+            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+            AVG(price) AS best_avg_price
+        FROM
+            price_history
+
+        WHERE
+            -- 2. Filtra para o item específico que você quer
+            item_id = ?
+
+        GROUP BY
+            -- 3. Agrupa por cada "janela" de dia da semana e hora
+            weekday,
+            hour
+
+        ORDER BY
+            -- 4. Ordena os resultados, colocando o maior preço médio no topo
+            best_avg_price DESC
+
+        LIMIT 1; -- 5. Pega APENAS o primeiro resultado (o melhor) """,
+        (item_id,),
+    ).fetchone()
+
+    weekday, hour, best_avg_price = selling_data
+
+    gold, silver = price_to_gold_and_silver(price)
+    best_avg_gold, best_avg_silver = price_to_gold_and_silver(best_avg_price)
+
+    diff = price - best_avg_price
+    diff_gold, diff_silver = price_to_gold_and_silver(diff)
+
+    now = datetime.datetime.now()
+    last_week_start = (now - datetime.timedelta(days=7)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    last_week_data = db_conn.execute(
+        f"""
+        SELECT
+            strftime('%F %T', timestamp), -- 0
+            price / 10000.0, -- 1
+            quantity -- 2
+        FROM price_history
+        WHERE item_id = ? AND timestamp >= '{last_week_start}'
+        ORDER BY timestamp DESC
+        LIMIT {7 * 24};
+        """,
+        (item_id,),
+    ).fetchall()
+
+    line_chart_price_data = {
+        "x": [data[0] for data in last_week_data],
+        "y": [data[1] for data in last_week_data],
+    }
+
+    line_chart_quantity_data = {
+        "x": [data[0] for data in last_week_data],
+        "y": [data[2] for data in last_week_data],
     }
 
     return {
@@ -259,7 +539,22 @@ def get_item(
         "rarity": rarity,
         "image": f"{request.base_url}{image_path}",
         "currentQuantity": quantity,
-        "currentPrice": {"gold": gold, "silver": silver},
-        "averagePriceData": ploty_heatmap_data,
+        "currentPrice": {"gold": int(gold), "silver": silver},
+        "averagePriceData": plotly_price_heatmap_data,
+        "averageQuantityData": plotly_quantity_heatmap_data,
+        "lastWeekData": {
+            "price": line_chart_price_data,
+            "quantity": line_chart_quantity_data,
+        },
         "lastTimeStamp": timestamp,
+        "selling": {
+            "weekday": weekday,
+            "hour": hour,
+            "price": {"gold": best_avg_gold, "silver": best_avg_silver},
+            "priceDiff": {
+                "sign": "positive" if diff >= 0 else "negative",
+                "gold": abs(diff_gold),
+                "silver": abs(diff_silver),
+            },
+        },
     }
