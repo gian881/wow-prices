@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import time
 from datetime import datetime
@@ -5,7 +6,6 @@ from datetime import datetime
 from fastapi import HTTPException
 import httpx
 import pandas as pd
-import requests
 
 from blizzard_api import fetch_blizzard_api
 
@@ -33,9 +33,13 @@ async def get_data(httpx_client: httpx.AsyncClient):
 
 def process_data(json_result, db_conn: sqlite3.Connection):
     log("Processing the new data")
-    items_ids = (
-        item[0] for item in db_conn.execute("SELECT id FROM items").fetchall()
-    )
+    db_result = db_conn.execute(
+        "SELECT id, quantity_threshold FROM items"
+    ).fetchall()
+
+    threshold_map = {item_id: threshold for item_id, threshold in db_result}
+    items_ids = set(threshold_map.keys())
+
     df = (
         pd.json_normalize(json_result["auctions"])
         .query("`item.id` in @items_ids")
@@ -46,7 +50,11 @@ def process_data(json_result, db_conn: sqlite3.Connection):
 
     df = df.groupby(["item_id", "price"])["quantity"].sum().reset_index()
 
-    df = df[df["quantity"] >= 100]
+    df = df[
+        df.apply(
+            lambda row: row["quantity"] >= threshold_map[row["item_id"]], axis=1
+        )
+    ]
 
     if not df.empty:
         df = (
@@ -63,14 +71,14 @@ def process_data(json_result, db_conn: sqlite3.Connection):
         log("No data to save after filtering.")
 
 
-def main() -> None:
+async def main() -> None:
     log("Initializing.")
     db_conn = sqlite3.connect("./data/test.db")
     client = httpx.AsyncClient()
 
     while True:
         res = db_conn.execute(
-            """SELECT timestamp FROM price_history ORDER BY timestamp DESC LIMIT 1"""
+            "SELECT timestamp FROM price_history ORDER BY timestamp DESC LIMIT 1"
         )
 
         last_timestamp = datetime.strptime(
@@ -80,7 +88,7 @@ def main() -> None:
         time_diff = datetime.now() - last_timestamp
         if time_diff.total_seconds() > 3600:
             log("It's been more than one hour, getting new data.")
-            data = get_data(client)
+            data = await get_data(client)
             process_data(data, db_conn)
             time.sleep(60 * 60)  # 60 minutos * 60 segundos
         else:
@@ -88,4 +96,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
