@@ -20,7 +20,7 @@ const searchTerm = ref('')
 
 async function fetchItems() {
   try {
-    const response = await fetch('http://localhost:8000/items')
+    const response = await fetch('http://localhost:8000/items?intent=sell')
     if (!response.ok) {
       throw new Error('Network response was not ok')
     }

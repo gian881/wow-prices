@@ -16,7 +16,7 @@ from unidecode import unidecode
 
 # from sqlmodel import Field, SQLModel
 from blizzard_api import fetch_blizzard_api
-from models import ItemOptionalsCreate
+from models import Intent, ItemOptionalsCreate
 from utils import price_to_gold_and_silver
 
 app = FastAPI()
@@ -269,6 +269,7 @@ def get_items(
     db_conn: sqlite3.Connection = Depends(get_db),
     order_by: str = "id",
     order: str = "desc",
+    intent: Intent = Intent.BOTH,
 ):
     order_by_map = {
         "id": "i.id",
@@ -304,8 +305,10 @@ def get_items(
                 latest_prices AS lp ON i.id = lp.item_id
             WHERE
                 lp.rn = 1
+                AND (i.intent = ?)
             ORDER BY {order_by_map.get(order_by, "i.id")} {order.upper() if order.lower() in ["asc", "desc"] else "DESC"}
-        """
+        """,
+        (intent.value,),
     ).fetchall()
 
     return [
