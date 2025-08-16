@@ -2,9 +2,9 @@
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
 import ItemImage from './ItemImage.vue'
-import { computed } from 'vue'
+import BellIcon from './icons/BellIcon.vue'
 
-const props = defineProps<{
+defineProps<{
   id: number
   name: string
   price: {
@@ -15,54 +15,72 @@ const props = defineProps<{
   rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
   image: string
   size?: 'sm' | 'md'
+  isNotificationOn?: boolean
+  notificationToggle?: boolean
 }>()
 
-const sizeClasses = computed(() => {
-  if (props.size === 'sm') {
-    return {
-      name: 'text-base',
-      coinText: 'text-sm',
-      coinSize: 'h-3 w-3',
-      itemImageSize: 'xs',
-    }
-  }
-  // Default to 'md' if not specified
-  return {
-    name: 'text-2xl',
-    coinText: 'text-base',
-    coinSize: 'h-4 w-4',
-    itemImageSize: 'md',
-  }
-})
+defineEmits<{
+  (event: 'toggle-notification'): void
+}>()
 </script>
 <template>
-  <router-link
-    :to="`/item/${id}`"
-    class="flex gap-3 rounded-lg p-2 transition-colors duration-500 hover:bg-white/5"
-  >
-    <item-image
-      :name="name"
-      :quality="quality"
-      :rarity="rarity"
-      :image="image"
-      :size="size === 'sm' ? 'xs' : 'md'"
-    />
-    <div class="flex min-w-0 flex-col items-start justify-between">
-      <p
-        :class="`w-full overflow-hidden ${sizeClasses.name} font-semibold text-ellipsis whitespace-nowrap`"
+  <div class="flex gap-3 rounded-lg p-2 transition-colors duration-500 hover:bg-white/5">
+    <router-link :to="`/item/${id}`" class="shrink-0">
+      <item-image
+        :name="name"
+        :quality="quality"
+        :rarity="rarity"
+        :image="image"
+        :size="size === 'sm' ? 'xs' : 'md'"
+      />
+    </router-link>
+    <div class="flex w-full min-w-0 flex-col items-start justify-between">
+      <router-link
+        :to="`/item/${id}`"
+        class="w-full overflow-hidden font-semibold text-ellipsis whitespace-nowrap"
+        :class="{
+          'text-base': size === 'sm',
+          'text-2xl': size !== 'sm',
+        }"
       >
         {{ name }}
-      </p>
-      <div :class="`text-light-yellow flex items-center gap-1.5 ${sizeClasses.coinText}`">
-        <div class="flex items-center gap-0.5">
-          <p>{{ price.gold }}</p>
-          <img :src="goldImage" alt="" :class="sizeClasses.coinSize" />
+      </router-link>
+      <div class="flex w-full items-baseline justify-between gap-2">
+        <div
+          class="text-light-yellow flex items-center gap-1.5"
+          :class="{
+            'text-sm': size === 'sm',
+            'text-base': size === 'md',
+          }"
+        >
+          <div class="flex items-center gap-0.5">
+            <p>{{ price.gold }}</p>
+            <img
+              :src="goldImage"
+              alt=""
+              :class="{
+                'h-3 w-3': size === 'sm',
+                'h-4 w-4': size === 'md',
+              }"
+            />
+          </div>
+          <div class="flex items-center gap-0.5">
+            <p>{{ price.silver }}</p>
+            <img
+              :src="silverImage"
+              alt=""
+              :class="{
+                'h-3 w-3': size === 'sm',
+                'h-4 w-4': size === 'md',
+              }"
+            />
+          </div>
         </div>
-        <div class="flex items-center gap-0.5">
-          <p>{{ price.silver }}</p>
-          <img :src="silverImage" alt="" :class="sizeClasses.coinSize" />
-        </div>
+
+        <button @click="$emit('toggle-notification')" v-if="notificationToggle">
+          <bell-icon :filled="isNotificationOn" class="h-6 w-6" />
+        </button>
       </div>
     </div>
-  </router-link>
+  </div>
 </template>

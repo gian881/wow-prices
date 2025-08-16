@@ -65,19 +65,32 @@ configureWebSocket()
       <img :src="wowLogo" alt="World of Warcraft: Ghosts of K'aresh Logo" />
       <h1 class="font-title text-5xl font-bold">WOW Prices</h1>
     </router-link>
-    <div class="flex items-center gap-2">
-      <router-link
-        to="/calculator"
-        class="text-accent-white hover:text-accent-400 mr-3 text-lg transition-colors duration-400 ease-in-out"
-      >
-        Calculadora
-      </router-link>
+    <div class="flex items-center gap-5">
+      <ul class="flex items-center gap-3">
+        <li>
+          <router-link
+            to="/week"
+            class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+          >
+            Semana
+          </router-link>
+        </li>
+        <li>
+          <router-link
+            to="/calculator"
+            class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+          >
+            Calculadora
+          </router-link>
+        </li>
+      </ul>
       <popover>
         <popover-trigger as="button" class="relative">
           <bell-icon
             :has-notifications="notifications.length > 0"
             class="text-light-yellow"
             aria-label="Notifications"
+            filled
           />
           <span
             v-if="notifications.length > 0"
@@ -110,9 +123,6 @@ configureWebSocket()
               "
             />
           </transition-group>
-          <!-- <router-link to="/notifications" class="text-light-yellow mt-2 text-center underline"
-            >Ver todas as notificações</router-link
-          > -->
         </popover-content>
       </popover>
     </div>

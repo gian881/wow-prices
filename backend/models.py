@@ -49,6 +49,46 @@ class ItemForNotification(BaseModel):
     rarity: str
 
 
+class Sign(Enum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+
+
+class PriceDiff(BaseModel):
+    sign: Sign
+    gold: int
+    silver: int
+
+
+class BuyingSellingData(BaseModel):
+    weekday: str
+    hour: int
+    price: PriceGoldSilver
+    price_diff: PriceDiff
+
+
+class ReturnItem(BaseModel):
+    id: int
+    name: str
+    quality: int
+    rarity: str
+    image: str
+    intent: Intent
+    quantity_threshold: int
+    notify_sell: bool
+    notify_buy: bool
+    above_alert: PriceGoldSilver
+    below_alert: PriceGoldSilver
+    current_quantity: int
+    current_price: PriceGoldSilver
+    average_price_data: dict
+    average_quantity_data: dict
+    last_week_data: dict
+    last_timestamp: str
+    selling: BuyingSellingData | None
+    buying: BuyingSellingData | None
+
+
 class Notification(SQLModel, table=True):
     id: int = Field(primary_key=True)
     type: NotificationType

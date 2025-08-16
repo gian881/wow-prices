@@ -17,8 +17,16 @@ def price_to_gold_and_silver(price: int | float) -> PriceGoldSilver:
     return PriceGoldSilver(gold=gold, silver=silver)
 
 
-def gold_and_silver_to_price(price_gold_and_silver: PriceGoldSilver) -> int:
+def gold_and_silver_to_price(
+    price_gold_and_silver: PriceGoldSilver | dict[str, int],
+) -> int:
     """Converte ouro e prata para preço em centavos."""
+    if isinstance(price_gold_and_silver, PriceGoldSilver):
+        return (
+            price_gold_and_silver.gold * 10000
+            + price_gold_and_silver.silver * 100
+        )
     return (
-        price_gold_and_silver.gold * 10000 + price_gold_and_silver.silver * 100
+        price_gold_and_silver["gold"] * 10000
+        + price_gold_and_silver["silver"] * 100
     )
