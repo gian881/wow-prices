@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import wowLogo from '@/assets/wow-logo.png'
 
+import type { Notification } from '@/types'
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import BellIcon from './icons/BellIcon.vue'
-import SearchIcon from './icons/SearchIcon.vue'
+import NotificationItem from './NotificationItem.vue'
 import Popover from './ui/popover/Popover.vue'
 import PopoverContent from './ui/popover/PopoverContent.vue'
 import PopoverTrigger from './ui/popover/PopoverTrigger.vue'
-import NotificationItem from './NotificationItem.vue'
-import type { Notification } from '@/types'
 
 const notifications = ref<Notification[]>([])
 
@@ -85,60 +84,47 @@ configureWebSocket()
           </router-link>
         </li>
       </ul>
-      <div class="flex items-center gap-2">
-        <input
-          type="text"
-          placeholder="Pesquisar item..."
-          class="bg-midnight-light-100 placeholder:text-light-yellow/75 text-light-yellow min-w-80 rounded-lg px-4 py-2"
-          aria-label="Search for items"
-        />
-        <button
-          class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow mr-2 rounded-lg p-2"
+      <popover>
+        <popover-trigger as="button" class="relative">
+          <bell-icon
+            :has-notifications="notifications.length > 0"
+            class="text-light-yellow"
+            aria-label="Notifications"
+            filled
+          />
+          <span
+            v-if="notifications.length > 0"
+            class="absolute min-w-4 rounded-full bg-[#B10000] p-0.5 text-center font-mono text-xs leading-none font-bold"
+            :class="{
+              'top-1 right-[3px]': notifications.length < 10,
+              'top-1 right-px': notifications.length >= 10,
+            }"
+            >{{ notifications.length }}
+          </span>
+        </popover-trigger>
+        <popover-content
+          as="div"
+          class="text-light-yellow mt-1 flex max-h-[calc(100vh-122px)] w-[436px] flex-col gap-2 overflow-x-hidden overflow-y-auto rounded-md border-none bg-[#252329] p-4"
+          align="end"
         >
-          <search-icon class="text-light-yellow" aria-label="Search for items" />
-        </button>
-        <popover>
-          <popover-trigger as="button" class="relative">
-            <bell-icon
-              :has-notifications="notifications.length > 0"
-              class="text-light-yellow"
-              aria-label="Notifications"
-              filled
+          <p v-if="notifications.length === 0" class="text-light-yellow/75 text-center text-sm">
+            Nenhuma nova notificação encontrada.
+          </p>
+          <transition-group name="notifications-list">
+            <notification-item
+              v-for="notification in notifications"
+              :key="notification.id"
+              :notification="notification"
+              @mark-as-read="
+                (id: number) => {
+                  notifications = notifications.filter((n) => n.id !== id)
+                  loadNotifications()
+                }
+              "
             />
-            <span
-              v-if="notifications.length > 0"
-              class="absolute min-w-4 rounded-full bg-[#B10000] p-0.5 text-center font-mono text-xs leading-none font-bold"
-              :class="{
-                'top-1 right-[3px]': notifications.length < 10,
-                'top-1 right-px': notifications.length >= 10,
-              }"
-              >{{ notifications.length }}
-            </span>
-          </popover-trigger>
-          <popover-content
-            as="div"
-            class="text-light-yellow mt-1 flex max-h-[calc(100vh-122px)] w-[436px] flex-col gap-2 overflow-x-hidden overflow-y-auto rounded-md border-none bg-[#252329] p-4"
-            align="end"
-          >
-            <p v-if="notifications.length === 0" class="text-light-yellow/75 text-center text-sm">
-              Nenhuma nova notificação encontrada.
-            </p>
-            <transition-group name="notifications-list">
-              <notification-item
-                v-for="notification in notifications"
-                :key="notification.id"
-                :notification="notification"
-                @mark-as-read="
-                  (id: number) => {
-                    notifications = notifications.filter((n) => n.id !== id)
-                    loadNotifications()
-                  }
-                "
-              />
-            </transition-group>
-          </popover-content>
-        </popover>
-      </div>
+          </transition-group>
+        </popover-content>
+      </popover>
     </div>
   </header>
 </template>

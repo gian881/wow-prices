@@ -113,3 +113,9 @@ class PriceHistory(SQLModel, table=True):
     price: int
     quantity: int
     timestamp: str = Field(primary_key=True)
+
+
+class ItemCache(SQLModel, table=True):
+    item_id: int = Field(primary_key=True)
+    blizzard_image_url: str
+    quality: int
