@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import Plotly from 'plotly.js-dist-min'
-import ItemImage from '@/components/ItemImage.vue'
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import { ref, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-import { customColorScale, getRelativeTime } from '@/utils'
+import NotifyDownIcon from '@/components/icons/NotifyDownIcon.vue'
+import NotifyUpIcon from '@/components/icons/NotifyUpIcon.vue'
 import SettingsIcon from '@/components/icons/SettingsIcon.vue'
+import ItemImage from '@/components/ItemImage.vue'
 import {
   Dialog,
   DialogContent,
@@ -24,8 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import NotifyUpIcon from '@/components/icons/NotifyUpIcon.vue'
-import NotifyDownIcon from '@/components/icons/NotifyDownIcon.vue'
+import { customColorScale, getRelativeTime } from '@/utils'
+import Plotly from 'plotly.js-dist-min'
+import { nextTick, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const item = ref<{
