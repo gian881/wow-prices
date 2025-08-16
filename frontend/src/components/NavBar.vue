@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import wowLogo from '@/assets/wow-logo.png'
 
+import type { Notification } from '@/types'
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import BellIcon from './icons/BellIcon.vue'
-import SearchIcon from './icons/SearchIcon.vue'
+import NotificationItem from './NotificationItem.vue'
 import Popover from './ui/popover/Popover.vue'
 import PopoverContent from './ui/popover/PopoverContent.vue'
 import PopoverTrigger from './ui/popover/PopoverTrigger.vue'
-import NotificationItem from './NotificationItem.vue'
-import type { Notification } from '@/types'
 
 const notifications = ref<Notification[]>([])
 
@@ -73,17 +72,6 @@ configureWebSocket()
       >
         Calculadora
       </router-link>
-      <input
-        type="text"
-        placeholder="Pesquisar item..."
-        class="bg-midnight-light-100 placeholder:text-light-yellow/75 text-light-yellow min-w-80 rounded-lg px-4 py-2"
-        aria-label="Search for items"
-      />
-      <button
-        class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow mr-2 rounded-lg p-2"
-      >
-        <search-icon class="text-light-yellow" aria-label="Search for items" />
-      </button>
       <popover>
         <popover-trigger as="button" class="relative">
           <bell-icon

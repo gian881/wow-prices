@@ -24,7 +24,13 @@ from PIL import Image
 from unidecode import unidecode
 
 from blizzard_api import fetch_blizzard_api
-from models import EditItem, Intent, ItemForNotification, NotificationType
+from models import (
+    CreateItemOptions,
+    EditItem,
+    Intent,
+    ItemForNotification,
+    NotificationType,
+)
 from utils import get_env, gold_and_silver_to_price, price_to_gold_and_silver
 
 app = FastAPI()
@@ -66,9 +72,6 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        print(f"Broadcasting message: {message}")
-        print(f"# of Active connections: {len(self.active_connections)}")
-        print(f"Active connections: {self.active_connections}")
         disconnected = []
         for connection in self.active_connections:
             try:
@@ -777,7 +780,7 @@ def get_items(
 @app.post("/items/{item_id}", status_code=201)
 async def add_item(
     item_id: int,
-    item_optionals: EditItem,
+    item_optionals: CreateItemOptions,
     db_conn: sqlite3.Connection = Depends(get_db),
     client: httpx.AsyncClient = Depends(get_http_client),
 ):
@@ -794,21 +797,35 @@ async def add_item(
             "Item",
         )
 
-        img_response = await fetch_blizzard_api(
-            item_response["media"]["key"]["href"],
-            client,
-        )
+        cached_item = db_conn.execute(
+            "SELECT blizzard_image_url, quality FROM item_cache WHERE item_id = ?",
+            (item_id,),
+        ).fetchone()
 
-        img_url = img_response["assets"][0]["value"]
+        if cached_item:
+            img_url = cached_item[0]
+            item_quality = cached_item[1]
+        else:
+            img_response = await fetch_blizzard_api(
+                item_response["media"]["key"]["href"],
+                client,
+            )
+            img_url = img_response["assets"][0]["value"]
+            item_quality = await get_item_quality(item_id, client)
+            db_conn.execute(
+                "INSERT INTO item_cache(item_id, blizzard_image_url, quality) VALUES (?, ?, ?)",
+                (item_id, img_url, item_quality),
+            )
+            db_conn.commit()
+
         img_path = os.path.join("static", "images", img_url.split("/")[-1])
-
         await download_image(client, img_url, img_path)
 
         item = {
             "id": item_id,
             "name": item_response["name"],
             "image_path": img_path.replace("\\", "/"),
-            "quality": await get_item_quality(item_id, client),
+            "quality": item_quality,
             "rarity": item_response["quality"]["type"],
             "quantity_threshold": item_optionals.quantity_threshold,
         }
