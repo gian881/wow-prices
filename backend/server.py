@@ -24,7 +24,14 @@ from PIL import Image
 from unidecode import unidecode
 
 from blizzard_api import fetch_blizzard_api
-from models import EditItem, Intent, ItemForNotification, NotificationType
+from models import (
+    EditItem,
+    Intent,
+    ItemForNotification,
+    NotificationType,
+    PriceGoldSilver,
+    ReturnItem,
+)
 from utils import get_env, gold_and_silver_to_price, price_to_gold_and_silver
 
 app = FastAPI()
@@ -178,30 +185,23 @@ async def create_and_broadcast_notification(
     notification_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[
         0
     ]
+    price_diff_obj = price_to_gold_and_silver(price_diff)
+    current_price_obj = price_to_gold_and_silver(current_price)
 
-    gold_diff, silver_diff = price_to_gold_and_silver(price_diff)
-    gold, silver = price_to_gold_and_silver(current_price)
     if price_threshold is not None:
-        gold_threshold, silver_threshold = price_to_gold_and_silver(
-            price_threshold
-        )
+        price_threshold_obj = price_to_gold_and_silver(price_threshold)
     else:
-        gold_threshold, silver_threshold = None, None
+        price_threshold_obj = None
 
     message = {
         "action": "new_notification",
         "data": {
             "id": notification_id,
             "type": notification_type.value,
-            "price_diff": {"gold": gold_diff, "silver": silver_diff},
-            "current_price": {"gold": gold, "silver": silver},
+            "price_diff": price_diff_obj,
+            "current_price": current_price_obj,
             "price_threshold": (
-                None
-                if price_threshold is None
-                else {
-                    "gold": gold_threshold,
-                    "silver": silver_threshold,
-                }
+                None if price_threshold is None else price_threshold_obj
             ),
             "item": {
                 "id": item.id,
@@ -664,6 +664,9 @@ def get_today_items(
         i.quality, -- 2
         i.image_path, -- 3
         i.rarity, -- 4
+        i.intent, -- 5
+        i.notify_buy, -- 6
+        i.notify_sell, -- 7
         CASE rp.weekday_num
             WHEN '0' THEN 'Domingo'
             WHEN '1' THEN 'Segunda'
@@ -672,10 +675,10 @@ def get_today_items(
             WHEN '4' THEN 'Quinta'
             WHEN '5' THEN 'Sexta'
             ELSE 'Sábado'
-        END AS weekday, -- 5
-        rp.hour, -- 6
-        rp.avg_price / 10000 AS gold, -- 7
-        (rp.avg_price % 10000) / 100 AS silver -- 8
+        END AS weekday, -- 8
+        rp.hour, -- 9
+        rp.avg_price / 10000 AS gold, -- 10
+        (rp.avg_price % 10000) / 100 AS silver -- 11
     FROM RankedHistory rp
     JOIN items i ON i.id = rp.item_id
     WHERE rp.rn = 1 AND CAST (rp.weekday_num AS INTEGER) = ? AND i.intent IN ('sell', 'both')
@@ -691,15 +694,18 @@ def get_today_items(
                 {
                     "id": item[0],
                     "name": item[1],
-                    "price": {"gold": int(item[7]), "silver": int(item[8])},
+                    "price": {"gold": int(item[10]), "silver": int(item[11])},
                     "quality": item[2],
                     "rarity": item[4],
                     "image": f"{request.base_url}{item[3]}",
+                    "intent": item[5],
+                    "notify_sell": bool(item[7]),
+                    "notify_buy": bool(item[6]),
                 }
                 for item in items
             ],
         }
-        for hour, items in itertools.groupby(results, key=lambda x: x[6])
+        for hour, items in itertools.groupby(results, key=lambda x: x[9])
     ]
 
 
@@ -739,14 +745,17 @@ def get_items(
                     price_history
             )
             SELECT
-                i.id,
-                i.name,
-                i.image_path,
-                i.quality,
-                lp.price,
-                lp.quantity,
-                lp.timestamp,
-                i.rarity
+                i.id, -- 0
+                i.name, -- 1
+                i.image_path, -- 2
+                i.quality, -- 3
+                i.intent, -- 4
+                i.notify_sell, -- 5
+                i.notify_buy, -- 6
+                i.rarity, -- 7
+                lp.price, -- 8
+                lp.quantity, -- 9
+                lp.timestamp -- 10
             FROM
                 items AS i
             JOIN
@@ -763,12 +772,15 @@ def get_items(
             "id": item[0],
             "name": item[1],
             "price": {
-                "gold": int(item[4] / 10000),
-                "silver": int((item[4] / 10000 - int(item[4] / 10000)) * 100),
+                "gold": int(item[8] / 10000),
+                "silver": int((item[8] / 10000 - int(item[8] / 10000)) * 100),
             },
             "quality": item[3],
             "image": f"{request.base_url}{item[2]}",
             "rarity": item[7],
+            "intent": item[4],
+            "notify_sell": bool(item[5]),
+            "notify_buy": bool(item[6]),
         }
         for item in result
     ]
@@ -833,7 +845,7 @@ async def add_item(
         )
 
 
-@app.get("/items/{item_id}")
+@app.get("/items/{item_id}", response_model=ReturnItem)
 def get_item(
     item_id: int,
     request: Request,
@@ -936,47 +948,86 @@ def get_item(
         quantity_heatmap_raw_data, "quantity"
     )
 
-    selling_data = db_conn.execute(
-        """
-        SELECT
-            -- 1. Formata os dados para ficarem legíveis
-            CASE strftime('%w', timestamp)
-                WHEN '0' THEN 'Domingo'
-                WHEN '1' THEN 'Segunda'
-                WHEN '2' THEN 'Terça'
-                WHEN '3' THEN 'Quarta'
-                WHEN '4' THEN 'Quinta'
-                WHEN '5' THEN 'Sexta'
-                ELSE 'Sábado'
-            END AS weekday,
-            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
-            AVG(price) AS best_avg_price
-        FROM
-            price_history
+    selling_weekday = buying_weekday = ""
+    selling_hour = buying_hour = selling_diff = buying_diff = 0
+    selling_best_avg_obj = PriceGoldSilver(gold=0, silver=0)
+    buying_best_avg_obj = PriceGoldSilver(gold=0, silver=0)
+    selling_diff_obj = PriceGoldSilver(gold=0, silver=0)
+    buying_diff_obj = PriceGoldSilver(gold=0, silver=0)
 
-        WHERE
-            -- 2. Filtra para o item específico que você quer
-            item_id = ?
+    if intent == "sell" or intent == "both":
+        selling_data = db_conn.execute(
+            """
+            SELECT
+                CASE strftime('%w', timestamp)
+                    WHEN '0' THEN 'Domingo'
+                    WHEN '1' THEN 'Segunda'
+                    WHEN '2' THEN 'Terça'
+                    WHEN '3' THEN 'Quarta'
+                    WHEN '4' THEN 'Quinta'
+                    WHEN '5' THEN 'Sexta'
+                    ELSE 'Sábado'
+                END AS weekday,
+                CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+                AVG(price) AS best_avg_price
+            FROM
+                price_history
 
-        GROUP BY
-            -- 3. Agrupa por cada "janela" de dia da semana e hora
-            weekday,
-            hour
+            WHERE
+                item_id = ?
 
-        ORDER BY
-            -- 4. Ordena os resultados, colocando o maior preço médio no topo
-            best_avg_price DESC
+            GROUP BY
+                weekday,
+                hour
 
-        LIMIT 1; -- 5. Pega APENAS o primeiro resultado (o melhor) """,
-        (item_id,),
-    ).fetchone()
+            ORDER BY
+                best_avg_price DESC
 
-    weekday, hour, best_avg_price = selling_data
-    diff = price - best_avg_price
+            LIMIT 1; -- 5. Pega APENAS o primeiro resultado (o melhor) """,
+            (item_id,),
+        ).fetchone()
+
+        selling_weekday, selling_hour, selling_best_avg_price = selling_data
+        selling_diff = price - selling_best_avg_price
+        selling_diff_obj = price_to_gold_and_silver(selling_diff)
+        selling_best_avg_obj = price_to_gold_and_silver(selling_best_avg_price)
+
+    if intent == "buy" or intent == "both":
+        buying_data = db_conn.execute(
+            """
+            SELECT
+                CASE strftime('%w', timestamp)
+                    WHEN '0' THEN 'Domingo'
+                    WHEN '1' THEN 'Segunda'
+                    WHEN '2' THEN 'Terça'
+                    WHEN '3' THEN 'Quarta'
+                    WHEN '4' THEN 'Quinta'
+                    WHEN '5' THEN 'Sexta'
+                    ELSE 'Sábado'
+                END AS weekday,
+                CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+                AVG(price) AS best_avg_price
+            FROM
+                price_history
+
+            WHERE
+                item_id = ?
+
+            GROUP BY
+                weekday,
+                hour
+
+            ORDER BY
+                best_avg_price ASC
+            LIMIT 1;""",
+            (item_id,),
+        ).fetchone()
+        buying_weekday, buying_hour, buying_best_avg_price = buying_data
+        buying_diff = price - buying_best_avg_price
+        buying_diff_obj = price_to_gold_and_silver(buying_diff)
+        buying_best_avg_obj = price_to_gold_and_silver(buying_best_avg_price)
 
     price_obj = price_to_gold_and_silver(price)
-    diff_obj = price_to_gold_and_silver(diff)
-    best_avg_obj = price_to_gold_and_silver(best_avg_price)
     above_obj = price_to_gold_and_silver(above_alert)
     below_obj = price_to_gold_and_silver(below_alert)
 
@@ -1031,15 +1082,29 @@ def get_item(
         },
         "last_timestamp": timestamp,
         "selling": {
-            "weekday": weekday,
-            "hour": hour,
-            "price": best_avg_obj,
+            "weekday": selling_weekday,
+            "hour": selling_hour,
+            "price": selling_best_avg_obj,
             "price_diff": {
-                "sign": "positive" if diff >= 0 else "negative",
-                "gold": abs(diff_obj.gold),
-                "silver": abs(diff_obj.silver),
+                "sign": "positive" if selling_diff >= 0 else "negative",
+                "gold": abs(selling_diff_obj.gold),
+                "silver": abs(selling_diff_obj.silver),
             },
-        },
+        }
+        if intent == "sell" or intent == "both"
+        else None,
+        "buying": {
+            "weekday": buying_weekday,
+            "hour": buying_hour,
+            "price": buying_best_avg_obj,
+            "price_diff": {
+                "sign": "positive" if buying_diff >= 0 else "negative",
+                "gold": abs(buying_diff_obj.gold),
+                "silver": abs(buying_diff_obj.silver),
+            },
+        }
+        if intent == "buy" or intent == "both"
+        else None,
     }
 
 

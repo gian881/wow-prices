@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import Plotly from 'plotly.js-dist-min'
-import ItemImage from '@/components/ItemImage.vue'
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import { ref, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-import { customColorScale, getRelativeTime } from '@/utils'
+import NotifyDownIcon from '@/components/icons/NotifyDownIcon.vue'
+import NotifyUpIcon from '@/components/icons/NotifyUpIcon.vue'
 import SettingsIcon from '@/components/icons/SettingsIcon.vue'
+import ItemImage from '@/components/ItemImage.vue'
 import {
   Dialog,
   DialogContent,
@@ -24,8 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import NotifyUpIcon from '@/components/icons/NotifyUpIcon.vue'
-import NotifyDownIcon from '@/components/icons/NotifyDownIcon.vue'
+import { customBuyColorScale, customSellColorScale, getRelativeTime } from '@/utils'
+import Plotly from 'plotly.js-dist-min'
+import { nextTick, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const item = ref<{
@@ -84,7 +84,20 @@ const item = ref<{
       gold: number
       silver: number
     }
-  }
+  } | null
+  buying: {
+    weekday: string
+    hour: number
+    price: {
+      gold: number
+      silver: number
+    }
+    price_diff: {
+      sign: string
+      gold: number
+      silver: number
+    }
+  } | null
 } | null>()
 
 const loading = ref(false)
@@ -189,7 +202,7 @@ watch(item, (newItem) => {
           {
             ...newItem.average_price_data,
             type: 'heatmap',
-            colorscale: customColorScale,
+            colorscale: item.value?.intent == 'sell' ? customSellColorScale : customBuyColorScale,
             texttemplate: '%{z:.2f}',
             text: newItem.average_price_data.z,
             textfont: { family: 'Poppins, sans-serif', size: 14 },
@@ -231,7 +244,7 @@ watch(item, (newItem) => {
           {
             ...newItem.average_quantity_data,
             type: 'heatmap',
-            colorscale: customColorScale,
+            colorscale: customSellColorScale,
             texttemplate: '%{z:.2f}',
             text: newItem.average_quantity_data.z,
             textfont: { family: 'Poppins, sans-serif', size: 14 },
@@ -280,7 +293,6 @@ async function fetchItem(id: string | string[]) {
       throw new Error(`Erro ao buscar item: ${response.statusText}`)
     }
     const jsonResponse = await response.json()
-
     item.value = jsonResponse
     intentEditForm.value = jsonResponse.intent
     notifySellEditForm.value = jsonResponse.notify_sell
@@ -370,9 +382,17 @@ async function saveSettings() {
       ></item-image>
       <div class="flex flex-col justify-between">
         <h1 class="text-3xl font-semibold">{{ item.name }}</h1>
-        <p>
+        <p v-if="item.selling && item.intent !== 'buy'" class="text-lg">
           Melhor dia de venda:
-          <span class="font-bold"> {{ item.selling.weekday }}</span>
+          <span class="font-semibold"> {{ item.selling.weekday }}</span>
+          às
+          <span class="font-semibold">{{ item.selling.hour.toString().padStart(2, '0') }}:00</span>
+        </p>
+        <p v-if="item.buying && item.intent !== 'sell'" class="text-lg">
+          Melhor dia de compra:
+          <span class="font-semibold"> {{ item.buying.weekday }}</span>
+          às
+          <span class="font-semibold">{{ item.buying.hour.toString().padStart(2, '0') }}:00</span>
         </p>
         <div class="text-light-yellow flex items-center gap-2">
           <div class="flex items-center gap-1.5 text-xl font-medium">
@@ -385,7 +405,7 @@ async function saveSettings() {
               <img :src="silverImage" alt="" class="h-5 w-5" />
             </div>
           </div>
-          <div class="flex items-center gap-1.5">
+          <div class="flex items-center gap-1.5" v-if="item.selling && item.intent !== 'buy'">
             <div class="flex items-center gap-0.5">
               <p>({{ item.selling.price_diff.gold }}</p>
               <img :src="goldImage" alt="" class="h-4 w-4" />
@@ -395,8 +415,31 @@ async function saveSettings() {
               <img :src="silverImage" alt="" class="h-4 w-4" />
             </div>
             <span
-              :class="`font-semibold ${item?.selling.price_diff.sign === 'negative' ? 'text-red-500' : 'text-green-500'}`"
+              class="font-semibold"
+              :class="{
+                'text-red-500': item?.selling.price_diff.sign === 'negative',
+                'text-green-500': item?.selling.price_diff.sign === 'positive',
+              }"
               >{{ item?.selling.price_diff.sign === 'negative' ? 'abaixo' : 'acima' }}</span
+            >
+            do preço "ideal")
+          </div>
+          <div class="flex items-center gap-1.5" v-if="item.buying && item.intent !== 'sell'">
+            <div class="flex items-center gap-0.5">
+              <p>({{ item.buying.price_diff.gold }}</p>
+              <img :src="goldImage" alt="" class="h-4 w-4" />
+            </div>
+            <div class="flex items-center gap-0.5">
+              <p>{{ item.buying.price_diff.silver }}</p>
+              <img :src="silverImage" alt="" class="h-4 w-4" />
+            </div>
+            <span
+              class="font-semibold"
+              :class="{
+                'text-red-500': item?.buying.price_diff.sign === 'positive',
+                'text-green-500': item?.buying.price_diff.sign === 'negative',
+              }"
+              >{{ item?.buying.price_diff.sign === 'negative' ? 'abaixo' : 'acima' }}</span
             >
             do preço "ideal")
           </div>

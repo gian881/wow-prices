@@ -27,3 +27,18 @@ export type Notification = {
   read: boolean
   created_at: string
 }
+
+export type Item = {
+  id: number
+  name: string
+  price: {
+    gold: number
+    silver: number
+  }
+  quality: number
+  image: string
+  rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
+  intent: 'buy' | 'sell' | 'both'
+  notify_sell: boolean
+  notify_buy: boolean
+}
