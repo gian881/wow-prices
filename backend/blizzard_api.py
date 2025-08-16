@@ -72,7 +72,6 @@ async def fetch_blizzard_api(
             detail=f"{resource_name} não encontrado na API da Blizzard.",
         )
 
-    # Lança um erro para outras respostas não sucedidas (ex: 500, 403)
     response.raise_for_status()
 
     return response.json()
