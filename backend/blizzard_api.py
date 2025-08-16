@@ -1,7 +1,8 @@
 import json
-from fastapi import HTTPException, status
+
 import httpx
 import requests
+from fastapi import HTTPException, status
 from requests.auth import HTTPBasicAuth
 
 from utils import get_env

@@ -24,7 +24,7 @@ from PIL import Image
 from unidecode import unidecode
 
 from blizzard_api import fetch_blizzard_api
-from models import EditItem, ItemForNotification, NotificationType, Intent, ItemOptionalsCreate
+from models import EditItem, Intent, ItemForNotification, NotificationType
 from utils import get_env, gold_and_silver_to_price, price_to_gold_and_silver
 
 app = FastAPI()
