@@ -2,7 +2,6 @@
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
 import ItemImage from './ItemImage.vue'
-// import XIcon from './icons/XIcon.vue'
 
 defineProps<{
   id: number
@@ -19,6 +18,7 @@ defineProps<{
 
 defineEmits<{
   (e: 'input', value: string): void
+  (e: 'blur'): void
 }>()
 </script>
 <template>
@@ -46,6 +46,7 @@ defineEmits<{
             type="text"
             :value="quantity"
             @input="$emit('input', ($event.target as HTMLInputElement)?.value)"
+            @blur="$emit('blur')"
             class="w-12 rounded-md border border-gray-300 p-1"
           />
           <!-- <button class="button-shadow rounded-xs bg-red-600 p-0.5" @click="$emit('')"><x-icon /></button> -->

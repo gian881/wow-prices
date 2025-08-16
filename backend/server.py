@@ -269,7 +269,7 @@ def get_items(
     db_conn: sqlite3.Connection = Depends(get_db),
     order_by: str = "id",
     order: str = "desc",
-    intent: Intent = Intent.BOTH,
+    intent: Intent | None = None,
 ):
     order_by_map = {
         "id": "i.id",
@@ -278,6 +278,14 @@ def get_items(
         "quality": "i.quality",
         "rarity": "i.rarity",
     }
+
+    intent_clause = ""
+    if intent == Intent.SELL:
+        intent_clause = "AND (i.intent = 'sell')"
+    elif intent == Intent.BUY:
+        intent_clause = "AND (i.intent = 'buy')"
+    elif intent == Intent.BOTH:
+        intent_clause = "AND (i.intent IN ('sell', 'buy'))"
 
     result = db_conn.execute(
         f"""WITH latest_prices AS (
@@ -305,10 +313,9 @@ def get_items(
                 latest_prices AS lp ON i.id = lp.item_id
             WHERE
                 lp.rn = 1
-                AND (i.intent = ?)
+                {intent_clause}
             ORDER BY {order_by_map.get(order_by, "i.id")} {order.upper() if order.lower() in ["asc", "desc"] else "DESC"}
         """,
-        (intent.value,),
     ).fetchall()
 
     return [
