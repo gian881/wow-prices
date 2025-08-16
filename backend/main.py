@@ -3,11 +3,12 @@ import sqlite3
 import time
 from datetime import datetime
 
-from fastapi import HTTPException
 import httpx
 import pandas as pd
+from fastapi import HTTPException
 
 from blizzard_api import fetch_blizzard_api
+from utils import get_env
 
 
 def log(message: str) -> None:
@@ -31,7 +32,30 @@ async def get_data(httpx_client: httpx.AsyncClient):
         print(e)
 
 
-def process_data(json_result, db_conn: sqlite3.Connection):
+async def notify_server(httpx_client: httpx.AsyncClient) -> None:
+    log("Notifying the server about new data.")
+
+    webhook_secret = get_env().get("INTERNAL_WEBHOOK_SECRET", "")
+    if not webhook_secret:
+        log("No webhook secret provided, skipping server notification.")
+        return
+
+    try:
+        response = await httpx_client.post(
+            "http://localhost:8000/internal/new-data",
+            headers={"X-Internal-Secret": webhook_secret},
+        )
+        if response.status_code == 200:
+            log("Server notified successfully.")
+
+        response.raise_for_status()
+    except Exception as e:
+        log(f"Failed to notify server: {e}")
+
+
+async def process_data(
+    json_result, db_conn: sqlite3.Connection, httpx_client: httpx.AsyncClient
+) -> None:
     log("Processing the new data")
     db_result = db_conn.execute(
         "SELECT id, quantity_threshold FROM items"
@@ -67,6 +91,10 @@ def process_data(json_result, db_conn: sqlite3.Connection):
 
         log("Saving the new data to the DB")
         df.to_sql("price_history", con=db_conn, if_exists="append", index=False)
+        try:
+            await notify_server(httpx_client)
+        except Exception as e:
+            log(f"Failed to notify server: {e}")
     else:
         log("No data to save after filtering.")
 
@@ -86,10 +114,10 @@ async def main() -> None:
         )
 
         time_diff = datetime.now() - last_timestamp
-        if time_diff.total_seconds() > 3600:
+        if time_diff.total_seconds() >= 3600:
             log("It's been more than one hour, getting new data.")
             data = await get_data(client)
-            process_data(data, db_conn)
+            await process_data(data, db_conn, client)
             time.sleep(60 * 60)  # 60 minutos * 60 segundos
         else:
             time.sleep(1 * 60)  # 1 minuto * 60 segundos
