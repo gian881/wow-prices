@@ -67,6 +67,12 @@ configureWebSocket()
       <h1 class="font-title text-5xl font-bold">WOW Prices</h1>
     </router-link>
     <div class="flex items-center gap-2">
+      <router-link
+        to="/calculator"
+        class="text-accent-white hover:text-accent-400 mr-3 text-lg transition-colors duration-400 ease-in-out"
+      >
+        Calculadora
+      </router-link>
       <input
         type="text"
         placeholder="Pesquisar item..."

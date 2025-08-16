@@ -44,7 +44,7 @@ async function fetchItems() {
   todayItemsError.value = null
 
   try {
-    const response = await fetch('http://localhost:8000/items')
+    const response = await fetch('http://localhost:8000/items?order_by=price&order=desc')
 
     if (!response.ok) {
       throw new Error(`Erro ao buscar itens: ${response.statusText}`)
