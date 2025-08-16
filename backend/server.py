@@ -16,7 +16,7 @@ from unidecode import unidecode
 
 # from sqlmodel import Field, SQLModel
 from blizzard_api import fetch_blizzard_api
-from models import ItemOptionalsCreate
+from models import Intent, ItemOptionalsCreate
 from utils import price_to_gold_and_silver
 
 app = FastAPI()
@@ -264,9 +264,31 @@ def get_today_items(
 
 
 @app.get("/items")
-def get_items(request: Request, db_conn: sqlite3.Connection = Depends(get_db)):
+def get_items(
+    request: Request,
+    db_conn: sqlite3.Connection = Depends(get_db),
+    order_by: str = "id",
+    order: str = "desc",
+    intent: Intent | None = None,
+):
+    order_by_map = {
+        "id": "i.id",
+        "name": "i.name",
+        "price": "lp.price",
+        "quality": "i.quality",
+        "rarity": "i.rarity",
+    }
+
+    intent_clause = ""
+    if intent == Intent.SELL:
+        intent_clause = "AND (i.intent = 'sell')"
+    elif intent == Intent.BUY:
+        intent_clause = "AND (i.intent = 'buy')"
+    elif intent == Intent.BOTH:
+        intent_clause = "AND (i.intent IN ('sell', 'buy'))"
+
     result = db_conn.execute(
-        """WITH latest_prices AS (
+        f"""WITH latest_prices AS (
                 SELECT
                     item_id,
                     price,
@@ -291,8 +313,9 @@ def get_items(request: Request, db_conn: sqlite3.Connection = Depends(get_db)):
                 latest_prices AS lp ON i.id = lp.item_id
             WHERE
                 lp.rn = 1
-            ORDER BY lp.price DESC
-        """
+                {intent_clause}
+            ORDER BY {order_by_map.get(order_by, "i.id")} {order.upper() if order.lower() in ["asc", "desc"] else "DESC"}
+        """,
     ).fetchall()
 
     return [
