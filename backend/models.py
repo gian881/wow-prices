@@ -100,6 +100,11 @@ class Notification(SQLModel, table=True):
     )
 
 
+class ErrorResponse(BaseModel):
+    status: str
+    message: str
+
+
 class Item(SQLModel, table=True):
     id: int = Field(primary_key=True)
     name: str

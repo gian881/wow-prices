@@ -12,6 +12,34 @@ import PopoverTrigger from './ui/popover/PopoverTrigger.vue'
 
 const notifications = ref<Notification[]>([])
 
+async function markAsReadAllBelow(id: number) {
+  const index = notifications.value.findIndex((n) => n.id === id)
+  if (index !== -1) {
+    const idsToMarkAsRead = notifications.value.slice(index).map((n) => n.id)
+    try {
+      const response = await fetch(`http://localhost:8000/notifications/mark-read`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(idsToMarkAsRead),
+      })
+
+      if (!response.ok) {
+        if (response.status === 500) {
+          const errorData = await response.json()
+          throw new Error(errorData.message)
+        }
+        throw new Error()
+      }
+
+      notifications.value = notifications.value.filter((n) => !idsToMarkAsRead.includes(n.id))
+    } catch (error) {
+      console.error('Failed to mark notifications as read:', error)
+    }
+  }
+}
+
 async function loadNotifications() {
   try {
     const response = await fetch('http://localhost:8000/notifications')
@@ -121,6 +149,7 @@ configureWebSocket()
                   loadNotifications()
                 }
               "
+              @mark-as-read-all-below="markAsReadAllBelow"
             />
           </transition-group>
         </popover-content>
