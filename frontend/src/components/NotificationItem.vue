@@ -6,6 +6,7 @@ import type { Notification } from '@/types'
 import { getRelativeTime } from '@/utils'
 import { computed, ref } from 'vue'
 import CheckIcon from './icons/CheckIcon.vue'
+import DownCheckIcon from './icons/DownCheckIcon.vue'
 
 const props = defineProps<{
   notification: Notification
@@ -13,6 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'mark-as-read', id: number): void
+  (e: 'mark-as-read-all-below', id: number): void
 }>()
 
 const title = computed(() => {
@@ -36,7 +38,7 @@ async function markAsRead() {
   markAsReadLoading.value = true
   try {
     const response = await fetch(
-      `http://localhost:8000/notification/${props.notification.id}/mark-read`,
+      `http://localhost:8000/notifications/${props.notification.id}/mark-read`,
       {
         method: 'POST',
       },
@@ -112,13 +114,23 @@ async function markAsRead() {
         <p class="text-light-yellow-200">{{ getRelativeTime(notification.created_at) }}</p>
       </div>
     </div>
-    <button
-      class="ring-accent my-auto rounded-md bg-white/5 p-1.5 ring transition-colors hover:bg-white/8 active:bg-white/12"
-      @click="markAsRead"
-      :disabled="markAsReadLoading"
-      v-if="!notification.read"
-    >
-      <check-icon />
-    </button>
+    <div class="flex gap-2 flex-col">
+      <button
+        class="ring-accent my-auto rounded-md bg-white/5 p-1.5 ring transition-colors hover:bg-white/8 active:bg-white/12"
+        @click="markAsRead"
+        :disabled="markAsReadLoading"
+        v-if="!notification.read"
+      >
+        <check-icon />
+      </button>
+      <button
+        class="ring-accent my-auto rounded-md bg-white/5 p-1.5 ring transition-colors hover:bg-white/8 active:bg-white/12"
+        @click="$emit('mark-as-read-all-below', notification.id)"
+        :disabled="markAsReadLoading"
+        v-if="!notification.read"
+      >
+        <down-check-icon />
+      </button>
+    </div>
   </div>
 </template>

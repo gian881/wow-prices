@@ -5,6 +5,7 @@ import os
 import sqlite3
 from io import BytesIO
 
+from fastapi.responses import JSONResponse
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup, Tag
@@ -27,6 +28,7 @@ from blizzard_api import fetch_blizzard_api
 from models import (
     CreateItemOptions,
     EditItem,
+    ErrorResponse,
     Intent,
     ItemForNotification,
     NotificationType,
@@ -471,7 +473,59 @@ async def websocket_endpoint(websocket: WebSocket):
         connection_manager.disconnect(websocket)
 
 
-@app.post("/notification/{notification_id}/mark-read")
+@app.post(
+    "/notifications/mark-read",
+    status_code=status.HTTP_200_OK,
+    responses={500: {"model": ErrorResponse}},
+)
+async def mark_notifications_as_read(
+    notification_ids: list[int], db_conn: sqlite3.Connection = Depends(get_db)
+):
+    if not notification_ids:
+        return {
+            "status": "ok",
+            "message": "Nenhum ID de notificação fornecido, nenhuma ação foi tomada",
+            "unknown_notifications": [],
+        }
+    try:
+        placeholders = ",".join("?" * len(notification_ids))
+
+        result = db_conn.execute(
+            f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})",
+            notification_ids,
+        )
+        db_conn.commit()
+
+        updated_count = result.rowcount
+
+        existing_notifications = db_conn.execute(
+            f"SELECT id FROM notifications WHERE id IN ({placeholders})",
+            notification_ids,
+        ).fetchall()
+
+        existing_ids = {row[0] for row in existing_notifications}
+
+        unknown_ids = [id for id in notification_ids if id not in existing_ids]
+
+        return {
+            "status": "ok",
+            "message": f"{updated_count} notificações foram marcadas como lidas.",
+            "unknown_notifications": unknown_ids,
+        }
+
+    except sqlite3.Error as e:
+        db_conn.rollback()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Erro no banco de dados: {e}",
+            },
+        )
+
+
+@app.post("/notifications/{notification_id}/mark-read")
 async def mark_notification_as_read(
     notification_id: int, db_conn: sqlite3.Connection = Depends(get_db)
 ):
