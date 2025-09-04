@@ -102,7 +102,7 @@ async function searchItem() {
   if (!id.value) return
 
   try {
-    const response = await fetch(`http://localhost:8000/items/${id.value}/add`)
+    const response = await fetch(`http://localhost:8000/items/${id.value}/lookup`)
 
     const data = await response.json()
     itemToAdd.value = data
