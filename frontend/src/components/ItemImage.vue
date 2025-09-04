@@ -56,12 +56,14 @@ const tierImageClass = computed(() => {
     <img
       :src="image"
       :alt="name"
-      class="rounded border-2"
+      class="rounded"
       :class="{
         'h-6 w-6': size === 'xxs',
         'h-10 w-10': size === 'xs',
         'h-16 w-16': size === 'sm',
         'h-20 w-20': size === 'md',
+        'border-2': size === 'sm' || size === 'md',
+        border: size === 'xxs' || size === 'xs',
 
         'border-common': rarity === 'COMMON',
         'border-uncommon': rarity === 'UNCOMMON',

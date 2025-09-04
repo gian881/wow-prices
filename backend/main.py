@@ -118,7 +118,7 @@ async def main() -> None:
             log("It's been more than one hour, getting new data.")
             data = await get_data(client)
             await process_data(data, db_conn, client)
-            time.sleep(60 * 60)  # 60 minutos * 60 segundos
+            time.sleep(60 * 60 - 1)  # 60 minutos * 60 segundos - 1 segundo
         else:
             time.sleep(1 * 60)  # 1 minuto * 60 segundos
 

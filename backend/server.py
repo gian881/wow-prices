@@ -94,20 +94,26 @@ async def get_http_client():
         yield client
 
 
-async def download_image(client: httpx.AsyncClient, url: str, file_path: str):
+async def download_image(
+    httpx_client: httpx.AsyncClient, url: str, file_path: str
+):
     if os.path.exists(file_path):
         return
-    img_response = await client.get(url)
+    img_response = await httpx_client.get(url)
 
     if img_response.status_code == 200:
         img = Image.open(BytesIO(img_response.content))
         img.save(file_path)
 
 
-async def get_item_quality(item_id: int, client: httpx.AsyncClient) -> int:
-    response = await client.get(f"https://www.wowhead.com/item={item_id}/")
+async def get_item_quality(
+    item_id: int, httpx_client: httpx.AsyncClient
+) -> int:
+    response = await httpx_client.get(
+        f"https://www.wowhead.com/item={item_id}/"
+    )
     if response.status_code == 301:
-        response = await client.get(
+        response = await httpx_client.get(
             f"https://www.wowhead.com{response.headers['location']}"
         )
     soup = BeautifulSoup(response.content, "html.parser")
@@ -843,36 +849,42 @@ async def add_item(
     item_id: int,
     item_optionals: CreateItemOptions,
     db_conn: sqlite3.Connection = Depends(get_db),
-    client: httpx.AsyncClient = Depends(get_http_client),
+    httpx_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     result = db_conn.execute(
-        "SELECT * FROM items WHERE id = ?", (item_id,)
+        "SELECT 1 FROM items WHERE id = ?", (item_id,)
     ).fetchone()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
     try:
-        item_response = await fetch_blizzard_api(
-            f"https://us.api.blizzard.com/data/wow/item/{item_id}",
-            client,
-            {"namespace": "static-us", "locale": "pt_BR"},
-            "Item",
-        )
-
         cached_item = db_conn.execute(
-            "SELECT blizzard_image_url, quality FROM item_cache WHERE item_id = ?",
+            "SELECT name, blizzard_image_url, quality, rarity FROM item_cache WHERE item_id = ?",
             (item_id,),
         ).fetchone()
 
         if cached_item:
-            img_url = cached_item[0]
-            item_quality = cached_item[1]
+            item_name = cached_item[0]
+            img_url = cached_item[1]
+            item_quality = cached_item[2]
+            item_rarity = cached_item[3]
+
         else:
+            item_response = await fetch_blizzard_api(
+                f"https://us.api.blizzard.com/data/wow/item/{item_id}",
+                httpx_client,
+                {"namespace": "static-us", "locale": "pt_BR"},
+                "Item",
+            )
+
+            item_name = item_response["name"]
+            item_rarity = item_response["quality"]["type"]
+
             img_response = await fetch_blizzard_api(
                 item_response["media"]["key"]["href"],
-                client,
+                httpx_client,
             )
             img_url = img_response["assets"][0]["value"]
-            item_quality = await get_item_quality(item_id, client)
+            item_quality = await get_item_quality(item_id, httpx_client)
             db_conn.execute(
                 "INSERT INTO item_cache(item_id, blizzard_image_url, quality) VALUES (?, ?, ?)",
                 (item_id, img_url, item_quality),
@@ -880,14 +892,14 @@ async def add_item(
             db_conn.commit()
 
         img_path = os.path.join("static", "images", img_url.split("/")[-1])
-        await download_image(client, img_url, img_path)
+        await download_image(httpx_client, img_url, img_path)
 
         item = {
             "id": item_id,
-            "name": item_response["name"],
+            "name": item_name,
             "image_path": img_path.replace("\\", "/"),
             "quality": item_quality,
-            "rarity": item_response["quality"]["type"],
+            "rarity": item_rarity,
             "quantity_threshold": item_optionals.quantity_threshold,
         }
 
@@ -908,6 +920,76 @@ async def add_item(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Resposta inesperada da API da Blizzard: {e}",
+        )
+
+
+@app.get("/items/{item_id}/lookup")
+async def get_item_blizzard(
+    item_id: int,
+    httpx_client: httpx.AsyncClient = Depends(get_http_client),
+    db_conn: sqlite3.Connection = Depends(get_db),
+):
+    result = db_conn.execute(
+        "SELECT 1 FROM items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if result is not None:
+        raise HTTPException(status_code=409, detail="Item já adicionado")
+
+    cached_item = db_conn.execute(
+        "SELECT * FROM item_cache WHERE item_id = ?", (item_id,)
+    ).fetchone()
+
+    if cached_item:
+        return {
+            "id": item_id,
+            "name": cached_item[1],
+            "image": cached_item[2],
+            "quality": cached_item[3],
+            "rarity": cached_item[4],
+        }
+
+    try:
+        item_response = await fetch_blizzard_api(
+            f"https://us.api.blizzard.com/data/wow/item/{item_id}",
+            httpx_client,
+            {"namespace": "static-us", "locale": "pt_BR"},
+            "Item",
+        )
+
+        img_response = await fetch_blizzard_api(
+            item_response["media"]["key"]["href"],
+            httpx_client,
+        )
+        img_url = img_response["assets"][0]["value"]
+        item_quality = await get_item_quality(item_id, httpx_client)
+
+        db_conn.execute(
+            """
+            INSERT INTO item_cache (item_id, name, blizzard_image_url, quality, rarity)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                item_id,
+                item_response["name"],
+                img_url,
+                item_quality,
+                item_response["quality"]["type"],
+            ),
+        )
+        db_conn.commit()
+
+        return {
+            "id": item_id,
+            "name": item_response["name"],
+            "image": img_url,
+            "quality": item_quality,
+            "rarity": item_response["quality"]["type"],
+        }
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Erro ao se comunicar com a API externa: {e}",
         )
 
 
