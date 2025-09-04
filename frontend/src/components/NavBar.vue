@@ -63,6 +63,7 @@ function onMessage(event: MessageEvent) {
     console.error('Error handling WebSocket message:', error)
   }
 }
+
 let ws: WebSocket
 function configureWebSocket() {
   ws = new WebSocket('ws://localhost:8000/ws')
@@ -97,8 +98,22 @@ configureWebSocket()
       <ul class="flex items-center gap-3">
         <li>
           <router-link
+            to="/items"
+            class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+            :class="{
+              'font-semibold': $route.path === '/items',
+            }"
+          >
+            Itens
+          </router-link>
+        </li>
+        <li>
+          <router-link
             to="/week"
             class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+            :class="{
+              'font-semibold': $route.path === '/week',
+            }"
           >
             Semana
           </router-link>
@@ -107,6 +122,9 @@ configureWebSocket()
           <router-link
             to="/calculator"
             class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+            :class="{
+              'font-semibold': $route.path === '/calculator',
+            }"
           >
             Calculadora
           </router-link>
