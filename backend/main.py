@@ -1,14 +1,18 @@
 import asyncio
+import os
 import sqlite3
 import time
 from datetime import datetime
 
+from dotenv import load_dotenv
 import httpx
 import pandas as pd
 from fastapi import HTTPException
 
 from app.blizzard_api import fetch_blizzard_api
-from app.utils import get_env
+from exceptions import EnvNotSetError
+
+load_dotenv()
 
 
 def log(message: str) -> None:
@@ -35,7 +39,7 @@ async def get_data(httpx_client: httpx.AsyncClient):
 async def notify_server(httpx_client: httpx.AsyncClient) -> None:
     log("Notifying the server about new data.")
 
-    webhook_secret = get_env().get("INTERNAL_WEBHOOK_SECRET", "")
+    webhook_secret = os.getenv("INTERNAL_WEBHOOK_SECRET")
     if not webhook_secret:
         log("No webhook secret provided, skipping server notification.")
         return
@@ -101,7 +105,11 @@ async def process_data(
 
 async def main() -> None:
     log("Initializing.")
-    db_conn = sqlite3.connect("./data/test.db")
+
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise EnvNotSetError("DATABASE_URL")
+    db_conn = sqlite3.connect(database_url)
     client = httpx.AsyncClient()
 
     while True:
@@ -124,4 +132,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except ValueError as e:
+        log(f"Error occurred: {e}")

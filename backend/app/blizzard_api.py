@@ -1,11 +1,12 @@
 import json
+import os
 
 import httpx
 import requests
 from fastapi import HTTPException, status
 from requests.auth import HTTPBasicAuth
 
-from app.utils import get_env
+from exceptions import EnvNotSetError
 
 
 def get_auth_token():
@@ -24,11 +25,15 @@ def get_auth_token():
 
 def generate_new_token():
     try:
-        env = get_env()
-        client_id = env.get("CLIENT_ID", "")
-        client_secret = env.get("CLIENT_SECRET", "")
-        if client_id == "" or client_secret == "":
-            raise Exception("Credenciais não configuradas.")
+        client_id = os.getenv("BLIZZARD_CLIENT_ID")
+        client_secret = os.getenv("BLIZZARD_CLIENT_SECRET")
+        if client_id is None or client_secret is None:
+            variables = []
+            if not client_id:
+                variables.append("BLIZZARD_CLIENT_ID")
+            if not client_secret:
+                variables.append("BLIZZARD_CLIENT_SECRET")
+            raise EnvNotSetError(variables)
 
         res = requests.post(
             "https://oauth.battle.net/token",
