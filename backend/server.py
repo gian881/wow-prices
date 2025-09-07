@@ -76,14 +76,8 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        disconnected = []
         for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                disconnected.append(connection)
-        for conn in disconnected:
-            self.disconnect(conn)
+            await connection.send_json(message)
 
 
 connection_manager = ConnectionManager()
@@ -170,6 +164,7 @@ async def create_and_broadcast_notification(
     price_diff: int,
     price_threshold: int | None = None,
 ):
+    print("Notification:", item.name, notification_type.value)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-3]
 
     db_conn.execute(
@@ -204,10 +199,12 @@ async def create_and_broadcast_notification(
         "data": {
             "id": notification_id,
             "type": notification_type.value,
-            "price_diff": price_diff_obj,
-            "current_price": current_price_obj,
+            "price_diff": price_diff_obj.model_dump(),
+            "current_price": current_price_obj.model_dump(),
             "price_threshold": (
-                None if price_threshold is None else price_threshold_obj
+                price_threshold_obj.model_dump()
+                if price_threshold_obj is not None
+                else None
             ),
             "item": {
                 "id": item.id,
@@ -460,6 +457,16 @@ async def notify_price_above_best_avg(
 
 
 async def notify_after_update(db_conn: sqlite3.Connection, base_url: str):
+    await connection_manager.broadcast(
+        {
+            "action": "new_data",
+            "data": {
+                "timestamp": datetime.datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+            },
+        }
+    )
     await notify_price_below(db_conn, base_url)
     await notify_price_above(db_conn, base_url)
     await notify_price_below_best_avg(db_conn, base_url)

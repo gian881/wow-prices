@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import ItemOnHome from '@/components/ItemOnHome.vue'
+import { state as websocketState } from '@/services/websocketService'
 import type { Item } from '@/types'
 import { isNotificationOn, toggleNotification } from '@/utils'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 
 const hoursAndItems = ref<
   {
@@ -35,6 +36,17 @@ async function fetchTodayItems() {
     isTodayItemsLoading.value = false
   }
 }
+
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if ('action' in newMessage && newMessage.action === 'new_data') {
+      fetchTodayItems()
+    }
+  },
+  { deep: true },
+)
 
 onMounted(() => {
   fetchTodayItems()

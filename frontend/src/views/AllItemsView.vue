@@ -22,9 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { state as websocketState } from '@/services/websocketService'
 import type { Item } from '@/types'
 import { isNotificationOn, toggleNotification } from '@/utils'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const isAllItemsLoading = ref(false)
 const allItemsError = ref<string | null>(null)
@@ -144,6 +145,17 @@ async function addItem() {
     console.error('Erro ao adicionar item:', error)
   }
 }
+
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if ('action' in newMessage && newMessage.action === 'new_data') {
+      fetchItems()
+    }
+  },
+  { deep: true },
+)
 
 onMounted(() => {
   fetchItems()
