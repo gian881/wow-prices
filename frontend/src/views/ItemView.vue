@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { state as websocketState } from '@/services/websocketService'
 import { customBuyColorScale, customSellColorScale, getRelativeTime } from '@/utils'
 import Plotly from 'plotly.js-dist-min'
 import { nextTick, ref, watch } from 'vue'
@@ -282,6 +283,17 @@ watch(item, (newItem) => {
     })
   }
 })
+
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if ('action' in newMessage && newMessage.action === 'new_data') {
+      fetchItem(route.params.id)
+    }
+  },
+  { deep: true },
+)
 
 async function fetchItem(id: string | string[]) {
   error.value = item.value = null

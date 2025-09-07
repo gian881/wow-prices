@@ -1,3 +1,5 @@
+import type { Item } from '@/types'
+
 export const customSellColorScale: [number, string][] = [
   [0.0, '#a50026'],
   [0.00392156862745098, '#a70226'],
@@ -544,4 +546,53 @@ export function getTodayWeekdayIndex(): number {
     .toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'long' })
     .toLowerCase()
   return weekdays.indexOf(currentWeekday)
+}
+
+export function isNotificationOn(item: Item): boolean {
+  if (item.intent === 'buy') {
+    return item.notify_buy
+  } else if (item.intent === 'sell') {
+    return item.notify_sell
+  } else if (item.intent === 'both') {
+    return item.notify_buy || item.notify_sell
+  }
+  return false
+}
+
+export async function toggleNotification(item: Item) {
+  const payload: { notify_buy?: boolean; notify_sell?: boolean } = {}
+
+  switch (item.intent) {
+    case 'buy':
+      payload.notify_buy = !item.notify_buy
+      break
+    case 'sell':
+      payload.notify_sell = !item.notify_sell
+      break
+    case 'both':
+      payload.notify_buy = !item.notify_buy
+      payload.notify_sell = !item.notify_sell
+      break
+    default:
+      console.error(`Ação para o 'intent' "${item.intent}" não é conhecida.`)
+      return
+  }
+
+  try {
+    const response = await fetch(`http://localhost:8000/items/${item.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`Erro ao atualizar notificação: ${response.statusText}`)
+    }
+
+    Object.assign(item, payload)
+  } catch (error) {
+    console.error('Erro ao atualizar notificação:', error)
+  }
 }

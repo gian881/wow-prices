@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import ItemOnCalculator from '@/components/ItemOnCalculator.vue'
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import { computed, onMounted, ref } from 'vue'
+import ItemOnCalculator from '@/components/ItemOnCalculator.vue'
+import { state as websocketState } from '@/services/websocketService'
+import { computed, onMounted, ref, watch } from 'vue'
 
 export type Item = {
   id: number
@@ -80,6 +81,17 @@ function loadItemQuantities() {
     })
   }
 }
+
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if ('action' in newMessage && newMessage.action === 'new_data') {
+      fetchItems()
+    }
+  },
+  { deep: true },
+)
 
 onMounted(async () => {
   await fetchItems()

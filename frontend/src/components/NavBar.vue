@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import wowLogo from '@/assets/wow-logo.png'
-
+import { state as websocketState } from '@/services/websocketService'
 import type { Notification } from '@/types'
-import { ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import BellIcon from './icons/BellIcon.vue'
 import NotificationItem from './NotificationItem.vue'
@@ -52,39 +52,24 @@ async function loadNotifications() {
   }
 }
 
-function onMessage(event: MessageEvent) {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: { action: string; data: { [key: string]: any } } = JSON.parse(event.data)
-    if (!data) return
-    if (!(data.action == 'new_notification')) return
-    notifications.value.unshift(data.data as Notification)
-  } catch (error) {
-    console.error('Error handling WebSocket message:', error)
-  }
-}
-let ws: WebSocket
-function configureWebSocket() {
-  ws = new WebSocket('ws://localhost:8000/ws')
-  ws.onmessage = onMessage
-  ws.onopen = () => {
-    console.log('WebSocket connection established')
-  }
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if (
+      'action' in newMessage &&
+      'data' in newMessage &&
+      newMessage.action === 'new_notification'
+    ) {
+      notifications.value.unshift(newMessage.data as Notification)
+    }
+  },
+  { deep: true },
+)
 
-  ws.onclose = () => {
-    console.log('WebSocket connection closed, attempting to reconnect...')
-    setTimeout(() => {
-      configureWebSocket()
-    }, 5000)
-  }
-
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error)
-  }
-}
-
-loadNotifications()
-configureWebSocket()
+onMounted(() => {
+  loadNotifications()
+})
 </script>
 
 <template>
@@ -97,8 +82,22 @@ configureWebSocket()
       <ul class="flex items-center gap-3">
         <li>
           <router-link
+            to="/items"
+            class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+            :class="{
+              'font-semibold': $route.path === '/items',
+            }"
+          >
+            Itens
+          </router-link>
+        </li>
+        <li>
+          <router-link
             to="/week"
             class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+            :class="{
+              'font-semibold': $route.path === '/week',
+            }"
           >
             Semana
           </router-link>
@@ -107,6 +106,9 @@ configureWebSocket()
           <router-link
             to="/calculator"
             class="text-accent-white hover:text-accent-400 text-lg transition-colors duration-400 ease-in-out"
+            :class="{
+              'font-semibold': $route.path === '/calculator',
+            }"
           >
             Calculadora
           </router-link>

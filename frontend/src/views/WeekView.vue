@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
 import ItemOnHome from '@/components/ItemOnHome.vue'
+import { state as websocketState } from '@/services/websocketService'
 import { getTodayWeekdayIndex } from '@/utils'
+import { onMounted, ref, watch } from 'vue'
 
 const items = ref<
   {
@@ -33,14 +34,28 @@ const daysOfWeek = [
   { normalizedName: 'sabado', displayName: 'Sábado' },
 ]
 
-onMounted(async () => {
+async function fetchWeekItems() {
   const response = await fetch('http://localhost:8000/items/week')
   if (!response.ok) {
     throw new Error(`Erro ao buscar itens: ${response.statusText}`)
   }
   const data = await response.json()
   items.value = data
-  console.log(data)
+}
+
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if ('action' in newMessage && newMessage.action === 'new_data') {
+      fetchWeekItems()
+    }
+  },
+  { deep: true },
+)
+
+onMounted(async () => {
+  await fetchWeekItems()
 })
 </script>
 

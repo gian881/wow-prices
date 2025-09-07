@@ -1,14 +1,22 @@
-import datetime
 from enum import Enum
 
 from pydantic import BaseModel
-from sqlmodel import Field, SQLModel
 
 
 class Intent(Enum):
     SELL = "sell"
     BUY = "buy"
     BOTH = "both"
+
+
+class Weekday(Enum):
+    DOMINGO = "domingo"
+    SEGUNDA = "segunda"
+    TERCA = "terca"
+    QUARTA = "quarta"
+    QUINTA = "quinta"
+    SEXTA = "sexta"
+    SABADO = "sabado"
 
 
 class NotificationType(Enum):
@@ -18,9 +26,25 @@ class NotificationType(Enum):
     PRICE_BELOW_BEST_AVG_ALERT = "price_below_best_avg_alert"
 
 
+class Sign(Enum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+
+
 class PriceGoldSilver(BaseModel):
     gold: int
     silver: int
+
+
+class PriceDiff(BaseModel):
+    sign: Sign
+    gold: int
+    silver: int
+
+
+class ErrorResponse(BaseModel):
+    status: str
+    message: str
 
 
 class CreateItemOptions(BaseModel):
@@ -47,17 +71,6 @@ class ItemForNotification(BaseModel):
     image_path: str
     quality: int
     rarity: str
-
-
-class Sign(Enum):
-    POSITIVE = "positive"
-    NEGATIVE = "negative"
-
-
-class PriceDiff(BaseModel):
-    sign: Sign
-    gold: int
-    silver: int
 
 
 class BuyingSellingData(BaseModel):
@@ -89,38 +102,31 @@ class ReturnItem(BaseModel):
     buying: BuyingSellingData | None
 
 
-class Notification(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    type: NotificationType
-    price_diff: int
-    item_id: int = Field(foreign_key="items.id")
-    read: bool = False
-    created_at: datetime.datetime = Field(
-        default_factory=datetime.datetime.now, nullable=False
-    )
-
-
-class ErrorResponse(BaseModel):
-    status: str
-    message: str
-
-
-class Item(SQLModel, table=True):
-    id: int = Field(primary_key=True)
+class SimpleItem(BaseModel):
+    id: int
     name: str
-    image_path: str
+    price: PriceGoldSilver
     quality: int
     rarity: str
+    image: str
 
 
-class PriceHistory(SQLModel, table=True):
-    item_id: int = Field(primary_key=True, foreign_key="items.id")
-    price: int
-    quantity: int
-    timestamp: str = Field(primary_key=True)
+class Hour(BaseModel):
+    hour: str
+    items: list[SimpleItem]
 
 
-class ItemCache(SQLModel, table=True):
-    item_id: int = Field(primary_key=True)
-    blizzard_image_url: str
-    quality: int
+class WeekResponse(BaseModel):
+    weekday: Weekday
+    hours: list[Hour]
+
+
+class TodayItem(SimpleItem):
+    intent: Intent
+    notify_sell: bool
+    notify_buy: bool
+
+
+class TodayResponse(BaseModel):
+    hour: str
+    items: list[TodayItem]
