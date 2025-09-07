@@ -7,8 +7,8 @@ import httpx
 import pandas as pd
 from fastapi import HTTPException
 
-from blizzard_api import fetch_blizzard_api
-from utils import get_env
+from app.blizzard_api import fetch_blizzard_api
+from app.utils import get_env
 
 
 def log(message: str) -> None:

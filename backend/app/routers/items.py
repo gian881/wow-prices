@@ -1,632 +1,42 @@
 import datetime
 import itertools
-import json
 import os
 import sqlite3
-from io import BytesIO
 
-from fastapi.responses import JSONResponse
 import httpx
-import pandas as pd
-from bs4 import BeautifulSoup, Tag
 from fastapi import (
+    APIRouter,
     Depends,
-    FastAPI,
     HTTPException,
     Request,
-    Security,
-    WebSocket,
     status,
 )
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
-from fastapi.staticfiles import StaticFiles
-from PIL import Image
 from unidecode import unidecode
 
-from blizzard_api import fetch_blizzard_api
-from models import (
+from app.dependencies import get_db, get_http_client
+from app.blizzard_api import fetch_blizzard_api
+from app.models import (
     CreateItemOptions,
     EditItem,
-    ErrorResponse,
     Intent,
-    ItemForNotification,
-    NotificationType,
     PriceGoldSilver,
     ReturnItem,
 )
-from utils import get_env, gold_and_silver_to_price, price_to_gold_and_silver
-
-app = FastAPI()
-
-API_KEY_HEADER = APIKeyHeader(name="X-Internal-Secret")
-INTERNAL_WEBHOOK_SECRET = get_env().get("INTERNAL_WEBHOOK_SECRET", "")
-
-origins = [
-    "http://localhost:5173",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from app.utils import (
+    download_image,
+    get_item_quality,
+    get_plotly_heatmap_data,
+    gold_and_silver_to_price,
+    price_to_gold_and_silver,
 )
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
-
-def get_db():
-    conn = sqlite3.connect("./data/test.db", check_same_thread=False)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            await connection.send_json(message)
-
-
-connection_manager = ConnectionManager()
-
-
-async def get_http_client():
-    async with httpx.AsyncClient() as client:
-        yield client
-
-
-async def download_image(
-    httpx_client: httpx.AsyncClient, url: str, file_path: str
-):
-    if os.path.exists(file_path):
-        return
-    img_response = await httpx_client.get(url)
-
-    if img_response.status_code == 200:
-        img = Image.open(BytesIO(img_response.content))
-        img.save(file_path)
-
-
-async def get_item_quality(
-    item_id: int, httpx_client: httpx.AsyncClient
-) -> int:
-    response = await httpx_client.get(
-        f"https://www.wowhead.com/item={item_id}/"
-    )
-    if response.status_code == 301:
-        response = await httpx_client.get(
-            f"https://www.wowhead.com{response.headers['location']}"
-        )
-    soup = BeautifulSoup(response.content, "html.parser")
-    script = soup.find("script", {"id": "data.page.wow.item.contextNames"})
-    if script and script.next_sibling and isinstance(script.next_sibling, Tag):
-        script_text = script.next_sibling.string
-        if script_text:
-            if "tier3.png" in script_text:
-                return 3
-            if "tier2.png" in script_text:
-                return 2
-            if "tier1.png" in script_text:
-                return 1
-    return 0
-
-
-def get_plotly_heatmap_data(
-    raw_data: list[tuple[str, int, float]], column_name: str
-):
-    weekday_order = [
-        "Domingo",
-        "Segunda",
-        "Terça",
-        "Quarta",
-        "Quinta",
-        "Sexta",
-        "Sábado",
-    ]
-
-    heatmap_df = pd.DataFrame(
-        raw_data, columns=["weekday", "hour", column_name]
-    )
-
-    heatmap_df["weekday"] = pd.Categorical(
-        heatmap_df["weekday"], categories=weekday_order, ordered=True
-    )
-    heatmap_df = heatmap_df.set_index(["weekday", "hour"])
-    heatmap_data = heatmap_df[column_name].unstack(level="weekday").sort_index()
-
-    heatmap_data_json = json.loads(heatmap_data.to_json(orient="split"))
-    return {
-        "x": heatmap_data_json["columns"],
-        "y": [f"{str(hour).zfill(2)}h" for hour in heatmap_data_json["index"]],
-        "z": heatmap_data_json["data"],
-    }
-
-
-async def create_and_broadcast_notification(
-    db_conn: sqlite3.Connection,
-    base_url: str,
-    item: ItemForNotification,
-    notification_type: NotificationType,
-    current_price: int,
-    price_diff: int,
-    price_threshold: int | None = None,
-):
-    print("Notification:", item.name, notification_type.value)
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-3]
-
-    db_conn.execute(
-        """
-        INSERT INTO notifications(type, price_diff, current_price, price_threshold, item_id, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            notification_type.value,
-            price_diff,
-            current_price,
-            price_threshold,
-            item.id,
-            now,
-        ),
-    )
-    db_conn.commit()
-
-    notification_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[
-        0
-    ]
-    price_diff_obj = price_to_gold_and_silver(price_diff)
-    current_price_obj = price_to_gold_and_silver(current_price)
-
-    if price_threshold is not None:
-        price_threshold_obj = price_to_gold_and_silver(price_threshold)
-    else:
-        price_threshold_obj = None
-
-    message = {
-        "action": "new_notification",
-        "data": {
-            "id": notification_id,
-            "type": notification_type.value,
-            "price_diff": price_diff_obj.model_dump(),
-            "current_price": current_price_obj.model_dump(),
-            "price_threshold": (
-                price_threshold_obj.model_dump()
-                if price_threshold_obj is not None
-                else None
-            ),
-            "item": {
-                "id": item.id,
-                "name": item.name,
-                "image": f"{base_url}{item.image_path}",
-                "quality": item.quality,
-                "rarity": item.rarity,
-            },
-            "read": False,
-            "created_at": now,
-        },
-    }
-
-    await connection_manager.broadcast(message)
-
-
-async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
-    items_to_notify = db_conn.execute("""
-        WITH latest_prices AS
-        (SELECT item_id,
-                price,
-                quantity,
-                timestamp,
-                ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
-        FROM price_history)
-        SELECT i.id,
-            i.name,
-            i.image_path,
-            i.quality,
-            i.rarity,
-            i.below_alert,
-            lp.price
-        FROM items AS i
-        JOIN latest_prices AS lp ON i.id = lp.item_id
-        WHERE lp.rn = 1
-        AND lp.price < i.below_alert
-        AND i.below_alert > 0
-        ORDER BY lp.price DESC
-    """).fetchall()
-
-    for item in items_to_notify:
-        (
-            item_id,
-            name,
-            image_path,
-            quality,
-            rarity,
-            price_threshold,
-            current_price,
-        ) = item
-
-        await create_and_broadcast_notification(
-            db_conn,
-            base_url,
-            ItemForNotification(
-                id=item_id,
-                name=name,
-                image_path=image_path,
-                quality=quality,
-                rarity=rarity,
-            ),
-            NotificationType.PRICE_BELOW_ALERT,
-            current_price,
-            abs(current_price - price_threshold),
-            price_threshold,
-        )
-
-
-async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
-    items_to_notify = db_conn.execute("""
-       WITH latest_prices AS
-        (SELECT item_id,
-                price,
-                quantity,
-                timestamp,
-                ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
-        FROM price_history)
-        SELECT i.id,
-            i.name,
-            i.image_path,
-            i.quality,
-            i.rarity,
-            i.above_alert,
-            lp.price
-        FROM items AS i
-        JOIN latest_prices AS lp ON i.id = lp.item_id
-        WHERE lp.rn = 1
-        AND lp.price > i.above_alert
-        AND i.above_alert > 0
-        ORDER BY lp.price DESC
-    """).fetchall()
-
-    for item in items_to_notify:
-        (
-            item_id,
-            name,
-            image_path,
-            quality,
-            rarity,
-            price_threshold,
-            current_price,
-        ) = item
-
-        await create_and_broadcast_notification(
-            db_conn,
-            base_url,
-            ItemForNotification(
-                id=item_id,
-                name=name,
-                image_path=image_path,
-                quality=quality,
-                rarity=rarity,
-            ),
-            NotificationType.PRICE_ABOVE_ALERT,
-            current_price,
-            abs(current_price - price_threshold),
-            price_threshold,
-        )
-
-
-async def notify_price_below_best_avg(
-    db_conn: sqlite3.Connection, base_url: str
-):
-    items_to_notify = db_conn.execute("""
-        WITH latest_prices AS (
-            -- Pega o preço mais recente de cada item
-            SELECT item_id, price, ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
-            FROM price_history
-        ),
-        lowest_avg_prices AS (
-            -- Calcula a menor média de preço histórica para cada item
-            SELECT item_id, MIN(avg_price) as min_avg_price
-            FROM (
-                -- Primeiro, calcula a média para cada dia/hora
-                SELECT item_id, AVG(price) as avg_price
-                FROM price_history
-                GROUP BY item_id, strftime('%w', timestamp), strftime('%H', timestamp)
-            )
-            GROUP BY item_id
-        )
-        -- Junta tudo e filtra os itens que atendem à condição
-        SELECT
-            i.id,
-            i.name,
-            i.image_path,
-            i.quality,
-            i.rarity,
-            lp.price AS current_price,
-            lap.min_avg_price
-        FROM items i
-        JOIN latest_prices lp ON i.id = lp.item_id
-        JOIN lowest_avg_prices lap ON i.id = lap.item_id
-        WHERE
-            (i.intent = 'buy' OR i.intent = 'both') -- Considera apenas itens que são para compra
-            AND i.notify_buy = 1 -- Considera apenas itens que têm notificação de compra ativada
-            AND lp.rn = 1 -- Garante que estamos usando o preço mais recente
-            AND lp.price < lap.min_avg_price -- A condição principal da notificação!
-    """).fetchall()
-
-    for item in items_to_notify:
-        (
-            item_id,
-            name,
-            image_path,
-            quality,
-            rarity,
-            current_price,
-            min_avg_price,
-        ) = item
-
-        await create_and_broadcast_notification(
-            db_conn,
-            base_url,
-            ItemForNotification(
-                id=item_id,
-                name=name,
-                image_path=image_path,
-                quality=quality,
-                rarity=rarity,
-            ),
-            NotificationType.PRICE_BELOW_BEST_AVG_ALERT,
-            current_price,
-            abs(current_price - min_avg_price),
-        )
-
-
-async def notify_price_above_best_avg(
-    db_conn: sqlite3.Connection, base_url: str
-):
-    items_to_notify = db_conn.execute("""
-        WITH latest_prices AS (
-            SELECT item_id, price, ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
-            FROM price_history
-        ),
-        highest_avg_prices AS (
-            -- Calcula a MAIOR média de preço histórica para cada item
-            SELECT item_id, MAX(avg_price) as max_avg_price
-            FROM (
-                -- Primeiro, calcula a média para cada dia/hora
-                SELECT item_id, AVG(price) as avg_price
-                FROM price_history
-                GROUP BY item_id, strftime('%w', timestamp), strftime('%H', timestamp)
-            )
-            GROUP BY item_id
-        )
-        -- Junta tudo e filtra os itens que atendem à condição
-        SELECT
-            i.id,
-            i.name,
-            i.image_path,
-            i.quality,
-            i.rarity,
-            lp.price AS current_price,
-            lap.max_avg_price
-        FROM items i
-        JOIN latest_prices lp ON i.id = lp.item_id
-        JOIN highest_avg_prices lap ON i.id = lap.item_id
-        WHERE
-            (i.intent = 'sell' OR i.intent = 'both') -- Considera apenas itens que são para venda
-            AND i.notify_sell = 1 -- Considera apenas itens que têm notificação de venda ativada
-            AND lp.rn = 1 -- Garante que estamos usando o preço mais recente
-            AND lp.price > lap.max_avg_price -- A condição principal da notificação!
-    """).fetchall()
-
-    for item in items_to_notify:
-        (
-            item_id,
-            name,
-            image_path,
-            quality,
-            rarity,
-            current_price,
-            max_avg_price,
-        ) = item
-
-        await create_and_broadcast_notification(
-            db_conn,
-            base_url,
-            ItemForNotification(
-                id=item_id,
-                name=name,
-                image_path=image_path,
-                quality=quality,
-                rarity=rarity,
-            ),
-            NotificationType.PRICE_ABOVE_BEST_AVG_ALERT,
-            current_price,
-            abs(current_price - max_avg_price),
-        )
-
-
-async def notify_after_update(db_conn: sqlite3.Connection, base_url: str):
-    await connection_manager.broadcast(
-        {
-            "action": "new_data",
-            "data": {
-                "timestamp": datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-            },
-        }
-    )
-    await notify_price_below(db_conn, base_url)
-    await notify_price_above(db_conn, base_url)
-    await notify_price_below_best_avg(db_conn, base_url)
-    await notify_price_above_best_avg(db_conn, base_url)
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await connection_manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            await websocket.send_text(f"Message received: {data}")
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-    finally:
-        connection_manager.disconnect(websocket)
-
-
-@app.post(
-    "/notifications/mark-read",
-    status_code=status.HTTP_200_OK,
-    responses={500: {"model": ErrorResponse}},
+router = APIRouter(
+    prefix="/items",
+    tags=["items"],
 )
-async def mark_notifications_as_read(
-    notification_ids: list[int], db_conn: sqlite3.Connection = Depends(get_db)
-):
-    if not notification_ids:
-        return {
-            "status": "ok",
-            "message": "Nenhum ID de notificação fornecido, nenhuma ação foi tomada",
-            "unknown_notifications": [],
-        }
-    try:
-        placeholders = ",".join("?" * len(notification_ids))
-
-        result = db_conn.execute(
-            f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})",
-            notification_ids,
-        )
-        db_conn.commit()
-
-        updated_count = result.rowcount
-
-        existing_notifications = db_conn.execute(
-            f"SELECT id FROM notifications WHERE id IN ({placeholders})",
-            notification_ids,
-        ).fetchall()
-
-        existing_ids = {row[0] for row in existing_notifications}
-
-        unknown_ids = [id for id in notification_ids if id not in existing_ids]
-
-        return {
-            "status": "ok",
-            "message": f"{updated_count} notificações foram marcadas como lidas.",
-            "unknown_notifications": unknown_ids,
-        }
-
-    except sqlite3.Error as e:
-        db_conn.rollback()
-
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": f"Erro no banco de dados: {e}",
-            },
-        )
 
 
-@app.post("/notifications/{notification_id}/mark-read")
-async def mark_notification_as_read(
-    notification_id: int, db_conn: sqlite3.Connection = Depends(get_db)
-):
-    result = db_conn.execute(
-        "UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,)
-    )
-    db_conn.commit()
-
-    if result.rowcount == 0:
-        raise HTTPException(
-            status_code=404, detail="Notificação não encontrada"
-        )
-
-    return {"message": "Notificação marcada como lida"}
-
-
-@app.get("/notifications")
-async def get_latest_notifications(
-    request: Request,
-    db_conn: sqlite3.Connection = Depends(get_db),
-):
-    results = db_conn.execute("""
-        SELECT notif.id, -- 0 
-            notif.type, -- 1
-            notif.price_diff, -- 2
-            notif.current_price, -- 3
-            notif.price_threshold, -- 4
-            notif.item_id, -- 5
-            notif.read, -- 6
-            notif.created_at, -- 7
-            i.id, -- 8
-            i.name, -- 9
-            i.image_path, -- 10
-            i.quality, -- 11
-            i.rarity -- 12
-        FROM notifications notif
-        JOIN items i ON notif.item_id = i.id
-        WHERE notif.read = 0
-        ORDER BY notif.created_at DESC
-    """).fetchall()
-
-    return [
-        {
-            "id": row[0],
-            "type": row[1],
-            "price_diff": {
-                "gold": int(row[2]) // 10000,
-                "silver": (int(row[2]) % 10000) // 100,
-            },
-            "current_price": {
-                "gold": int(row[3]) // 10000,
-                "silver": (int(row[3]) % 10000) // 100,
-            },
-            "price_threshold": (
-                None
-                if row[4] is None
-                else {
-                    "gold": int(row[4]) // 10000,
-                    "silver": (int(row[4]) % 10000) // 100,
-                }
-            ),
-            "item": {
-                "id": row[8],
-                "name": row[9],
-                "image": f"{request.base_url}{row[10]}",
-                "quality": row[11],
-                "rarity": row[12],
-            },
-            "read": bool(row[6]),
-            "created_at": row[7],
-        }
-        for row in results
-    ]
-
-
-@app.post("/internal/new-data")
-async def trigger_data_update_function(
-    request: Request,
-    secret: str = Security(API_KEY_HEADER),
-    db_conn: sqlite3.Connection = Depends(get_db),
-):
-    if secret != INTERNAL_WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Acesso não autorizado")
-
-    await notify_after_update(db_conn, str(request.base_url))
-
-
-@app.get("/items/week")
+@router.get("/week")
 def get_week_items(
     request: Request, db_conn: sqlite3.Connection = Depends(get_db)
 ):
@@ -698,7 +108,7 @@ def get_week_items(
     ]
 
 
-@app.get("/items/today")
+@router.get("/today")
 def get_today_items(
     request: Request, db_conn: sqlite3.Connection = Depends(get_db)
 ):
@@ -774,7 +184,7 @@ def get_today_items(
     ]
 
 
-@app.get("/items")
+@router.get("/")
 def get_items(
     request: Request,
     db_conn: sqlite3.Connection = Depends(get_db),
@@ -851,7 +261,7 @@ def get_items(
     ]
 
 
-@app.post("/items/{item_id}", status_code=201)
+@router.post("/{item_id}", status_code=201)
 async def add_item(
     item_id: int,
     item_optionals: CreateItemOptions,
@@ -930,7 +340,7 @@ async def add_item(
         )
 
 
-@app.get("/items/{item_id}/lookup")
+@router.get("/{item_id}/lookup")
 async def get_item_blizzard(
     item_id: int,
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
@@ -1000,7 +410,7 @@ async def get_item_blizzard(
         )
 
 
-@app.get("/items/{item_id}", response_model=ReturnItem)
+@router.get("/{item_id}", response_model=ReturnItem)
 def get_item(
     item_id: int,
     request: Request,
@@ -1263,7 +673,7 @@ def get_item(
     }
 
 
-@app.put("/items/{item_id}")
+@router.put("/{item_id}")
 def update_item(
     item_id: int,
     item_updates: EditItem,

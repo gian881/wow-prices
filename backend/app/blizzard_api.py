@@ -5,7 +5,7 @@ import requests
 from fastapi import HTTPException, status
 from requests.auth import HTTPBasicAuth
 
-from utils import get_env
+from app.utils import get_env
 
 
 def get_auth_token():
