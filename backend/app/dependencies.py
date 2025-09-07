@@ -1,10 +1,17 @@
+import os
 import sqlite3
 
 import httpx
 
+from exceptions import EnvNotSetError
+
 
 def get_db():
-    conn = sqlite3.connect("../data/test.db", check_same_thread=False)
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise EnvNotSetError("DATABASE_URL")
+
+    conn = sqlite3.connect(database_url, check_same_thread=False)
     try:
         yield conn
     finally:

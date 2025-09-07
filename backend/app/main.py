@@ -1,10 +1,14 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import websocket
 
-from .routers import internal, items, notifications
+load_dotenv()
+
+from .routers import internal, items, notifications  # noqa: E402
+
 
 app = FastAPI()
 app.include_router(items.router)
@@ -23,4 +27,4 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.mount("/static", StaticFiles(directory="../static"), name="static")
+app.mount("/static", StaticFiles(directory="./static"), name="static")
