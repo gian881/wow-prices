@@ -7,7 +7,7 @@ import pandas as pd
 from bs4 import BeautifulSoup, Tag
 from PIL import Image
 
-from app.models import PriceGoldSilver
+from app.schemas import PriceGoldSilver
 
 
 def get_env() -> dict[str, str]:

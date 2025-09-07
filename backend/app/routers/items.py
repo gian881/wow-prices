@@ -15,12 +15,16 @@ from unidecode import unidecode
 
 from app.dependencies import get_db, get_http_client
 from app.blizzard_api import fetch_blizzard_api
-from app.models import (
+from app.models import Item
+from app.schemas import (
     CreateItemOptions,
     EditItem,
     Intent,
     PriceGoldSilver,
     ReturnItem,
+    TodayItem,
+    TodayResponse,
+    WeekResponse,
 )
 from app.utils import (
     download_image,
@@ -36,7 +40,7 @@ router = APIRouter(
 )
 
 
-@router.get("/week")
+@router.get("/week", response_model=list[WeekResponse])
 def get_week_items(
     request: Request, db_conn: sqlite3.Connection = Depends(get_db)
 ):
@@ -108,7 +112,7 @@ def get_week_items(
     ]
 
 
-@router.get("/today")
+@router.get("/today", response_model=list[TodayResponse])
 def get_today_items(
     request: Request, db_conn: sqlite3.Connection = Depends(get_db)
 ):
@@ -184,7 +188,7 @@ def get_today_items(
     ]
 
 
-@router.get("/")
+@router.get("/", response_model=list[TodayItem])
 def get_items(
     request: Request,
     db_conn: sqlite3.Connection = Depends(get_db),
@@ -311,18 +315,36 @@ async def add_item(
         img_path = os.path.join("static", "images", img_url.split("/")[-1])
         await download_image(httpx_client, img_url, img_path)
 
-        item = {
-            "id": item_id,
-            "name": item_name,
-            "image_path": img_path.replace("\\", "/"),
-            "quality": item_quality,
-            "rarity": item_rarity,
-            "quantity_threshold": item_optionals.quantity_threshold,
-        }
+        item = Item(
+            id=item_id,
+            name=item_name,
+            image_path=img_path.replace("\\", "/"),
+            quality=item_quality,
+            rarity=item_rarity,
+            quantity_threshold=item_optionals.quantity_threshold,
+            intent=item_optionals.intent,
+            above_alert=gold_and_silver_to_price(item_optionals.above_alert),
+            below_alert=gold_and_silver_to_price(item_optionals.below_alert),
+            notify_sell=item_optionals.notify_sell,
+            notify_buy=item_optionals.notify_buy,
+        )
 
         db_conn.execute(
-            "INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold) VALUES (:id, :name, :image_path, :quality, :rarity, :quantity_threshold)",
-            item,
+            """INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold, intent, above_alert, below_alert, notify_sell, notify_buy)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                item.id,
+                item.name,
+                item.image_path,
+                item.quality,
+                item.rarity,
+                item.quantity_threshold,
+                item.intent,
+                item.above_alert,
+                item.below_alert,
+                item.notify_sell,
+                item.notify_buy,
+            ),
         )
         db_conn.commit()
 

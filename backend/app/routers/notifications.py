@@ -10,7 +10,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from app.dependencies import get_db
-from app.models import ErrorResponse
+from app.schemas import ErrorResponse
 
 router = APIRouter(
     prefix="/notifications",

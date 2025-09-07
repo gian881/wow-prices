@@ -4,7 +4,8 @@ import sqlite3
 from app.utils import price_to_gold_and_silver
 
 from ..websocket import connection_manager
-from app.models import ItemForNotification, NotificationType
+from app.models import NotificationType
+from app.schemas import ItemForNotification
 
 
 async def create_and_broadcast_notification(
