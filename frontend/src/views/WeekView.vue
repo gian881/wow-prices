@@ -35,7 +35,7 @@ const daysOfWeek = [
 ]
 
 async function fetchWeekItems() {
-  const response = await fetch('http://localhost:8000/items/week')
+  const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/week`)
   if (!response.ok) {
     throw new Error(`Erro ao buscar itens: ${response.statusText}`)
   }

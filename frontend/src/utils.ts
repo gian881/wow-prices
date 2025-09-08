@@ -579,7 +579,7 @@ export async function toggleNotification(item: Item) {
   }
 
   try {
-    const response = await fetch(`http://localhost:8000/items/${item.id}`, {
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/${item.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
       headers: {

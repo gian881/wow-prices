@@ -38,7 +38,7 @@ async function markAsRead() {
   markAsReadLoading.value = true
   try {
     const response = await fetch(
-      `http://localhost:8000/notifications/${props.notification.id}/mark-read`,
+      `${import.meta.env.VITE_BACKEND_BASE_URL}/notifications/${props.notification.id}/mark-read`,
       {
         method: 'POST',
       },
