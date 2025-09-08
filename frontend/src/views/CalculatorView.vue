@@ -82,6 +82,13 @@ function loadItemQuantities() {
   }
 }
 
+function resetQuantities() {
+  items.value.forEach((item) => {
+    item.quantity = 0
+  })
+  saveItemQuantities()
+}
+
 watch(
   () => websocketState.lastMessage,
   (newMessage) => {
@@ -101,7 +108,15 @@ onMounted(async () => {
 
 <template>
   <main class="mt-6">
-    <h1 class="font-title text-3xl font-bold">Calculadora de possível venda</h1>
+    <div class="flex items-center justify-between">
+      <h1 class="font-title text-3xl font-bold">Calculadora de possível venda</h1>
+      <button
+        class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow rounded-md p-2.5 transition-colors duration-400"
+        @click="resetQuantities"
+      >
+        Limpar valores
+      </button>
+    </div>
     <div class="bg-midnight-light-200 mt-6 grid grid-cols-4 gap-4 overflow-x-auto rounded-md p-4">
       <item-on-calculator
         v-for="item in items"
