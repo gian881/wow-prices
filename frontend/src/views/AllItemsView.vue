@@ -36,7 +36,9 @@ async function fetchItems() {
   allItemsError.value = null
 
   try {
-    const response = await fetch('http://localhost:8000/items?order_by=price&order=desc')
+    const response = await fetch(
+      `${import.meta.env.VITE_BACKEND_BASE_URL}/items?order_by=price&order=desc`,
+    )
 
     if (!response.ok) {
       throw new Error(`Erro ao buscar itens: ${response.statusText}`)
@@ -103,7 +105,9 @@ async function searchItem() {
   if (!id.value) return
 
   try {
-    const response = await fetch(`http://localhost:8000/items/${id.value}/lookup`)
+    const response = await fetch(
+      `${import.meta.env.VITE_BACKEND_BASE_URL}/items/${id.value}/lookup`,
+    )
 
     const data = await response.json()
     itemToAdd.value = data
@@ -116,25 +120,28 @@ async function addItem() {
   if (!itemToAdd.value) return
 
   try {
-    const response = await fetch(`http://localhost:8000/items/${itemToAdd.value.id}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      `${import.meta.env.VITE_BACKEND_BASE_URL}/items/${itemToAdd.value.id}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: itemToAdd.value.id,
+          name: itemToAdd.value.name,
+          image: itemToAdd.value.image,
+          quality: itemToAdd.value.quality,
+          rarity: itemToAdd.value.rarity,
+          intent: intent.value,
+          notifySell: notifySell.value,
+          notifyBuy: notifyBuy.value,
+          quantityThreshold: quantityThreshold.value,
+          aboveAlert: aboveAlert.value,
+          belowAlert: belowAlert.value,
+        }),
       },
-      body: JSON.stringify({
-        id: itemToAdd.value.id,
-        name: itemToAdd.value.name,
-        image: itemToAdd.value.image,
-        quality: itemToAdd.value.quality,
-        rarity: itemToAdd.value.rarity,
-        intent: intent.value,
-        notifySell: notifySell.value,
-        notifyBuy: notifyBuy.value,
-        quantityThreshold: quantityThreshold.value,
-        aboveAlert: aboveAlert.value,
-        belowAlert: belowAlert.value,
-      }),
-    })
+    )
 
     if (!response.ok) {
       throw new Error(`Erro ao adicionar item: ${response.statusText}`)

@@ -355,13 +355,16 @@ async function saveSettings() {
   }
 
   try {
-    const response = await fetch(`http://localhost:8000/items/${item.value.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      `${import.meta.env.VITE_BACKEND_BASE_URL}/items/${item.value.id}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedItem),
       },
-      body: JSON.stringify(updatedItem),
-    })
+    )
 
     if (!response.ok) {
       throw new Error(`Erro ao salvar configurações: ${response.statusText}`)

@@ -20,7 +20,7 @@ async function fetchTodayItems() {
   todayItemsError.value = null
 
   try {
-    const response = await fetch('http://localhost:8000/items/today')
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/today`)
 
     if (!response.ok) {
       throw new Error(`Erro ao buscar itens: ${response.statusText}`)

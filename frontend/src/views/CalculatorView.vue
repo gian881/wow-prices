@@ -22,7 +22,7 @@ const items = ref<Item[]>([])
 
 async function fetchItems() {
   try {
-    const response = await fetch('http://localhost:8000/items?intent=sell')
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items?intent=sell`)
     if (!response.ok) {
       throw new Error('Network response was not ok')
     }

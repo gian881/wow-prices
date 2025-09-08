@@ -17,13 +17,16 @@ async function markAsReadAllBelow(id: number) {
   if (index !== -1) {
     const idsToMarkAsRead = notifications.value.slice(index).map((n) => n.id)
     try {
-      const response = await fetch(`http://localhost:8000/notifications/mark-read`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const response = await fetch(
+        `${import.meta.env.VITE_BACKEND_BASE_URL}/notifications/mark-read`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(idsToMarkAsRead),
         },
-        body: JSON.stringify(idsToMarkAsRead),
-      })
+      )
 
       if (!response.ok) {
         if (response.status === 500) {
@@ -42,7 +45,7 @@ async function markAsReadAllBelow(id: number) {
 
 async function loadNotifications() {
   try {
-    const response = await fetch('http://localhost:8000/notifications')
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/notifications`)
     if (!response.ok) {
       throw new Error('Network response was not ok')
     }
