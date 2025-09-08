@@ -332,8 +332,10 @@ function closeDialog() {
     notifySellEditForm.value = item.value.notify_sell
     notifyBuyEditForm.value = item.value.notify_buy
     quantityThresholdEditForm.value = item.value.quantity_threshold
-    aboveAlertEditForm.value = item.value.above_alert
-    belowAlertEditForm.value = item.value.below_alert
+    aboveAlertEditForm.value.gold = item.value.above_alert.gold
+    aboveAlertEditForm.value.silver = item.value.above_alert.silver
+    belowAlertEditForm.value.gold = item.value.below_alert.gold
+    belowAlertEditForm.value.silver = item.value.below_alert.silver
   }
   isSettingsDialogOpen.value = false
 }
