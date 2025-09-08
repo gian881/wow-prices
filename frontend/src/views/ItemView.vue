@@ -312,6 +312,9 @@ async function fetchItem(id: string | string[]) {
     quantityThresholdEditForm.value = jsonResponse.quantity_threshold
     aboveAlertEditForm.value = jsonResponse.above_alert
     belowAlertEditForm.value = jsonResponse.below_alert
+
+    const qualityString = jsonResponse.quality === 0 ? '' : ` - ${jsonResponse.quality}`
+    document.title = `${jsonResponse.name}${qualityString} - WOW Prices`
   } catch (err) {
     if (err instanceof Error) {
       error.value = err.message
