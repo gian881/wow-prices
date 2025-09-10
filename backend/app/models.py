@@ -1,46 +1,54 @@
 import datetime
 
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlmodel import Field, SQLModel
 
-from app.schemas import Intent, NotificationType
+from app.schemas import Intent, NotificationType, Rarity
 
 
-# ===================================================================
-# 2. Modelos de Tabela (SQLModel) - Mapeamento do Banco de Dados
-# ===================================================================
 class Item(SQLModel, table=True):
     id: int = Field(primary_key=True)
     name: str
     image_path: str
-    quality: int
-    rarity: str
-    quantity_threshold: int = 100
-    intent: Intent = Intent.SELL
-    above_alert: int = 0
-    below_alert: int = 0
-    notify_sell: bool = False
-    notify_buy: bool = False
+    quality: int = Field(default=0)
+    rarity: Rarity = Field(default=Rarity.COMMON)
+    quantity_threshold: int = Field(default=100)
+    intent: Intent = Field(default=Intent.SELL)
+    above_alert: int = Field(default=0)
+    below_alert: int = Field(default=0)
+    notify_sell: bool = Field(default=False)
+    notify_buy: bool = Field(default=False)
 
 
 class Notification(SQLModel, table=True):
     id: int = Field(primary_key=True)
     type: NotificationType
-    price_diff: int
+    price_diff: int = Field(default=0)
+    current_price: int
+    price_threshold: int
     item_id: int = Field(foreign_key="items.id")
-    read: bool = False
+    read: bool = Field(default=False)
     created_at: datetime.datetime = Field(
-        default_factory=datetime.datetime.now, nullable=False
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        nullable=False,
+        sa_column_kwargs={"type_": TIMESTAMP(timezone=True)},
     )
 
 
 class PriceHistory(SQLModel, table=True):
     item_id: int = Field(primary_key=True, foreign_key="items.id")
     price: int
-    quantity: int
-    timestamp: str = Field(primary_key=True)
+    quantity: int = Field(default=0)
+    created_at: datetime.datetime = Field(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        nullable=False,
+        sa_column_kwargs={"type_": TIMESTAMP(timezone=True)},
+    )
 
 
 class ItemCache(SQLModel, table=True):
     item_id: int = Field(primary_key=True)
+    name: str
     blizzard_image_url: str
-    quality: int
+    quality: int = Field(default=0)
+    rarity: Rarity = Field(default=Rarity.COMMON)

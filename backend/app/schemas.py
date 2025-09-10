@@ -26,6 +26,17 @@ class NotificationType(Enum):
     PRICE_BELOW_BEST_AVG_ALERT = "price_below_best_avg_alert"
 
 
+class Rarity(Enum):
+    POOR = "POOR"
+    COMMON = "COMMON"
+    UNCOMMON = "UNCOMMON"
+    RARE = "RARE"
+    EPIC = "EPIC"
+    LEGENDARY = "LEGENDARY"
+    ARTIFACT = "ARTIFACT"
+    HEIRLOOM = "HEIRLOOM"
+
+
 class Sign(Enum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
