@@ -48,8 +48,8 @@ def get_week_items(
     WITH AggregatedHistory AS (    
         SELECT 
             item_id,
-            strftime('%w', timestamp) AS weekday_num,
-            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+            strftime('%w', timestamp, '-3 hours') AS weekday_num,
+            CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
             AVG(price) AS avg_price
         FROM price_history
         GROUP BY item_id, weekday_num, hour
@@ -124,8 +124,8 @@ def get_today_items(
     WITH AggregatedHistory AS (    
         SELECT 
             item_id,
-            strftime('%w', timestamp) AS weekday_num,
-            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+            strftime('%w', timestamp, '-3 hours') AS weekday_num,
+            CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
             AVG(price) AS avg_price
         FROM price_history
         GROUP BY item_id, weekday_num, hour
@@ -234,7 +234,7 @@ def get_items(
                 i.rarity, -- 7
                 lp.price, -- 8
                 lp.quantity, -- 9
-                lp.timestamp -- 10
+                strftime('%Y-%m-%d %H:%M:%S', lp.timestamp, '-3 hours') -- 10
             FROM
                 items AS i
             JOIN
@@ -452,7 +452,7 @@ def get_item(
                 i.notify_buy, -- 9
                 ph.price, -- 10
                 ph.quantity, -- 11
-                ph.timestamp -- 12
+                strftime('%Y-%m-%d %H:%M:%S', ph.timestamp, '-3 hours') -- 12
             FROM
                 items AS i
             JOIN
@@ -488,7 +488,7 @@ def get_item(
     price_heatmap_raw_data = db_conn.execute(
         """
         SELECT
-            CASE strftime('%w', timestamp)
+            CASE strftime('%w', timestamp, '-3 hours')
                 WHEN '0' THEN 'Domingo'
                 WHEN '1' THEN 'Segunda'
                 WHEN '2' THEN 'Terça'
@@ -497,12 +497,12 @@ def get_item(
                 WHEN '5' THEN 'Sexta'
                 WHEN '6' THEN 'Sábado'
             END AS weekday,
-            CAST (strftime('%H', timestamp) AS INTEGER) AS hour,
+            CAST (strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
             AVG(price) / 10000.0 AS avg_price
         FROM price_history
         WHERE item_id = ?
         GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp), hour;""",
+        ORDER BY strftime('%w', timestamp, '-3 hours'), hour;""",
         (item_id,),
     ).fetchall()
 
@@ -513,7 +513,7 @@ def get_item(
     quantity_heatmap_raw_data = db_conn.execute(
         """
         SELECT
-            CASE strftime('%w', timestamp)
+            CASE strftime('%w', timestamp, '-3 hours')
                 WHEN '0' THEN 'Domingo'
                 WHEN '1' THEN 'Segunda'
                 WHEN '2' THEN 'Terça'
@@ -522,12 +522,12 @@ def get_item(
                 WHEN '5' THEN 'Sexta'
                 WHEN '6' THEN 'Sábado'
             END AS weekday,
-            CAST (strftime('%H', timestamp) AS INTEGER) AS hour,
+            CAST (strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
             AVG(quantity) AS avg_quantity
         FROM price_history
         WHERE item_id = ?
         GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp), hour;""",
+        ORDER BY strftime('%w', timestamp, '-3 hours'), hour;""",
         (item_id,),
     ).fetchall()
 
@@ -546,7 +546,7 @@ def get_item(
         selling_data = db_conn.execute(
             """
             SELECT
-                CASE strftime('%w', timestamp)
+                CASE strftime('%w', timestamp, '-3 hours')
                     WHEN '0' THEN 'Domingo'
                     WHEN '1' THEN 'Segunda'
                     WHEN '2' THEN 'Terça'
@@ -555,7 +555,7 @@ def get_item(
                     WHEN '5' THEN 'Sexta'
                     ELSE 'Sábado'
                 END AS weekday,
-                CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+                CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
                 AVG(price) AS best_avg_price
             FROM
                 price_history
@@ -583,7 +583,7 @@ def get_item(
         buying_data = db_conn.execute(
             """
             SELECT
-                CASE strftime('%w', timestamp)
+                CASE strftime('%w', timestamp, '-3 hours')
                     WHEN '0' THEN 'Domingo'
                     WHEN '1' THEN 'Segunda'
                     WHEN '2' THEN 'Terça'
@@ -592,7 +592,7 @@ def get_item(
                     WHEN '5' THEN 'Sexta'
                     ELSE 'Sábado'
                 END AS weekday,
-                CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+                CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
                 AVG(price) AS best_avg_price
             FROM
                 price_history
@@ -618,7 +618,7 @@ def get_item(
     above_obj = price_to_gold_and_silver(above_alert)
     below_obj = price_to_gold_and_silver(below_alert)
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
     last_week_start = (now - datetime.timedelta(days=7)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
@@ -626,7 +626,7 @@ def get_item(
     last_week_data = db_conn.execute(
         f"""
         SELECT
-            strftime('%F %T', timestamp), -- 0
+            strftime('%F %T', timestamp, '-3 hours'), -- 0
             price / 10000.0, -- 1
             quantity -- 2
         FROM price_history

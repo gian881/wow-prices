@@ -1,3 +1,4 @@
+import datetime
 import sqlite3
 
 from fastapi import (
@@ -100,7 +101,7 @@ async def get_latest_notifications(
             notif.price_threshold, -- 4
             notif.item_id, -- 5
             notif.read, -- 6
-            notif.created_at, -- 7
+            strftime("%Y-%m-%d %H:%M:%S", notif.created_at), -- 7
             i.id, -- 8
             i.name, -- 9
             i.image_path, -- 10
@@ -140,7 +141,11 @@ async def get_latest_notifications(
                 "rarity": row[12],
             },
             "read": bool(row[6]),
-            "created_at": row[7],
+            "created_at": datetime.datetime.strptime(
+                row[7], "%Y-%m-%d %H:%M:%S"
+            )
+            .replace(tzinfo=datetime.timezone.utc)
+            .isoformat(),
         }
         for row in results
     ]

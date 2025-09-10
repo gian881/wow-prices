@@ -92,8 +92,8 @@ async def process_data(
         )
 
         df["timestamp"] = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S.%f"
-        )[:-3]
+            "%Y-%m-%d %H:%M:%S"
+        )
 
         log("Saving the new data to the DB")
         df.to_sql("price_history", con=db_conn, if_exists="append", index=False)

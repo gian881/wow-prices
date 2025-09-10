@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timezone
 import sqlite3
 
 from app.utils import price_to_gold_and_silver
@@ -18,7 +18,8 @@ async def create_and_broadcast_notification(
     price_threshold: int | None = None,
 ):
     print("Notification:", item.name, notification_type.value)
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-3]
+    now = datetime.now(timezone.utc)
+    now_string = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     db_conn.execute(
         """
@@ -31,7 +32,7 @@ async def create_and_broadcast_notification(
             current_price,
             price_threshold,
             item.id,
-            now,
+            now_string,
         ),
     )
     db_conn.commit()
@@ -67,7 +68,7 @@ async def create_and_broadcast_notification(
                 "rarity": item.rarity,
             },
             "read": False,
-            "created_at": now,
+            "created_at": now.isoformat(),
         },
     }
 
@@ -194,7 +195,7 @@ async def notify_price_below_best_avg(
                 -- Primeiro, calcula a média para cada dia/hora
                 SELECT item_id, AVG(price) as avg_price
                 FROM price_history
-                GROUP BY item_id, strftime('%w', timestamp), strftime('%H', timestamp)
+                GROUP BY item_id, strftime('%w', timestamp, '-3 hours'), strftime('%H', timestamp, '-3 hours')
             )
             GROUP BY item_id
         )
@@ -259,7 +260,7 @@ async def notify_price_above_best_avg(
                 -- Primeiro, calcula a média para cada dia/hora
                 SELECT item_id, AVG(price) as avg_price
                 FROM price_history
-                GROUP BY item_id, strftime('%w', timestamp), strftime('%H', timestamp)
+                GROUP BY item_id, strftime('%w', timestamp, '-3 hours'), strftime('%H', timestamp, '-3 hours')
             )
             GROUP BY item_id
         )
@@ -314,9 +315,7 @@ async def notify_after_update(db_conn: sqlite3.Connection, base_url: str):
         {
             "action": "new_data",
             "data": {
-                "timestamp": datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         }
     )
