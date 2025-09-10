@@ -1,6 +1,5 @@
 import datetime
 
-from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlmodel import Field, SQLModel
 
 from app.schemas import Intent, NotificationType, Rarity
@@ -21,7 +20,7 @@ class Item(SQLModel, table=True):
 
 
 class Notification(SQLModel, table=True):
-    id: int = Field(primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     type: NotificationType
     price_diff: int = Field(default=0)
     current_price: int
@@ -31,7 +30,6 @@ class Notification(SQLModel, table=True):
     created_at: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
         nullable=False,
-        sa_column_kwargs={"type_": TIMESTAMP(timezone=True)},
     )
 
 
@@ -39,10 +37,9 @@ class PriceHistory(SQLModel, table=True):
     item_id: int = Field(primary_key=True, foreign_key="items.id")
     price: int
     quantity: int = Field(default=0)
-    created_at: datetime.datetime = Field(
+    timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
         nullable=False,
-        sa_column_kwargs={"type_": TIMESTAMP(timezone=True)},
     )
 
 
