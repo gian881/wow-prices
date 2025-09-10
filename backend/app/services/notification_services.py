@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-import sqlite3
+
+from sqlmodel import Session, text
 
 from app.utils import price_to_gold_and_silver
 
@@ -9,7 +10,7 @@ from app.schemas import ItemForNotification
 
 
 async def create_and_broadcast_notification(
-    db_conn: sqlite3.Connection,
+    db_session: Session,
     base_url: str,
     item: ItemForNotification,
     notification_type: NotificationType,
@@ -21,25 +22,30 @@ async def create_and_broadcast_notification(
     now = datetime.now(timezone.utc)
     now_string = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    db_conn.execute(
-        """
+    db_session.execute(
+        text("""
         INSERT INTO notifications(type, price_diff, current_price, price_threshold, item_id, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            notification_type.value,
-            price_diff,
-            current_price,
-            price_threshold,
-            item.id,
-            now_string,
-        ),
+        VALUES (:type, :price_diff, :current_price, :price_threshold, :item_id, :created_at)
+        """),
+        {
+            "type": notification_type.value,
+            "price_diff": price_diff,
+            "current_price": current_price,
+            "price_threshold": price_threshold,
+            "item_id": item.id,
+            "created_at": now_string,
+        },
     )
-    db_conn.commit()
+    db_session.commit()
 
-    notification_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[
-        0
-    ]
+    notification_id = db_session.execute(
+        text("SELECT last_insert_rowid()")
+    ).fetchone()
+    notification_id = notification_id[0] if notification_id else None
+    if notification_id is None:
+        print("Erro ao obter o ID da notificação inserida.")
+        return
+
     price_diff_obj = price_to_gold_and_silver(price_diff)
     current_price_obj = price_to_gold_and_silver(current_price)
 
@@ -75,8 +81,9 @@ async def create_and_broadcast_notification(
     await connection_manager.broadcast(message)
 
 
-async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
-    items_to_notify = db_conn.execute("""
+async def notify_price_below(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
         WITH latest_prices AS
         (SELECT item_id,
                 price,
@@ -97,7 +104,8 @@ async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
         AND lp.price < i.below_alert
         AND i.below_alert > 0
         ORDER BY lp.price DESC
-    """).fetchall()
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -111,7 +119,7 @@ async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -127,8 +135,9 @@ async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
         )
 
 
-async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
-    items_to_notify = db_conn.execute("""
+async def notify_price_above(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
        WITH latest_prices AS
         (SELECT item_id,
                 price,
@@ -149,7 +158,8 @@ async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
         AND lp.price > i.above_alert
         AND i.above_alert > 0
         ORDER BY lp.price DESC
-    """).fetchall()
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -163,7 +173,7 @@ async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -179,10 +189,9 @@ async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
         )
 
 
-async def notify_price_below_best_avg(
-    db_conn: sqlite3.Connection, base_url: str
-):
-    items_to_notify = db_conn.execute("""
+async def notify_price_below_best_avg(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
         WITH latest_prices AS (
             -- Pega o preço mais recente de cada item
             SELECT item_id, price, ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
@@ -216,7 +225,8 @@ async def notify_price_below_best_avg(
             AND i.notify_buy = 1 -- Considera apenas itens que têm notificação de compra ativada
             AND lp.rn = 1 -- Garante que estamos usando o preço mais recente
             AND lp.price < lap.min_avg_price -- A condição principal da notificação!
-    """).fetchall()
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -230,7 +240,7 @@ async def notify_price_below_best_avg(
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -245,10 +255,9 @@ async def notify_price_below_best_avg(
         )
 
 
-async def notify_price_above_best_avg(
-    db_conn: sqlite3.Connection, base_url: str
-):
-    items_to_notify = db_conn.execute("""
+async def notify_price_above_best_avg(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
         WITH latest_prices AS (
             SELECT item_id, price, ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
             FROM price_history
@@ -281,7 +290,8 @@ async def notify_price_above_best_avg(
             AND i.notify_sell = 1 -- Considera apenas itens que têm notificação de venda ativada
             AND lp.rn = 1 -- Garante que estamos usando o preço mais recente
             AND lp.price > lap.max_avg_price -- A condição principal da notificação!
-    """).fetchall()
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -295,7 +305,7 @@ async def notify_price_above_best_avg(
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -310,7 +320,7 @@ async def notify_price_above_best_avg(
         )
 
 
-async def notify_after_update(db_conn: sqlite3.Connection, base_url: str):
+async def notify_after_update(db_session: Session, base_url: str):
     await connection_manager.broadcast(
         {
             "action": "new_data",
@@ -319,7 +329,7 @@ async def notify_after_update(db_conn: sqlite3.Connection, base_url: str):
             },
         }
     )
-    await notify_price_below(db_conn, base_url)
-    await notify_price_above(db_conn, base_url)
-    await notify_price_below_best_avg(db_conn, base_url)
-    await notify_price_above_best_avg(db_conn, base_url)
+    await notify_price_below(db_session, base_url)
+    await notify_price_above(db_session, base_url)
+    await notify_price_below_best_avg(db_session, base_url)
+    await notify_price_above_best_avg(db_session, base_url)

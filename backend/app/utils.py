@@ -1,11 +1,13 @@
 import json
 import os
 from io import BytesIO
+from typing import Any, Sequence
 
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup, Tag
 from PIL import Image
+from sqlalchemy import Row
 
 from app.schemas import PriceGoldSilver
 
@@ -69,8 +71,12 @@ async def get_item_quality(
 
 
 def get_plotly_heatmap_data(
-    raw_data: list[tuple[str, int, float]], column_name: str
+    raw_data: Sequence[Row[Any]],
+    column_name: str,
 ):
+    if not raw_data:
+        return {"x": [], "y": [], "z": []}
+
     weekday_order = [
         "Domingo",
         "Segunda",

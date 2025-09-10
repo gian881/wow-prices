@@ -1,7 +1,6 @@
 import datetime
 import itertools
 import os
-import sqlite3
 
 import httpx
 from fastapi import (
@@ -11,6 +10,7 @@ from fastapi import (
     Request,
     status,
 )
+from sqlmodel import Session, text
 from unidecode import unidecode
 
 from app.dependencies import get_db, get_http_client
@@ -41,10 +41,9 @@ router = APIRouter(
 
 
 @router.get("/week", response_model=list[WeekResponse])
-def get_week_items(
-    request: Request, db_conn: sqlite3.Connection = Depends(get_db)
-):
-    results = db_conn.execute("""
+def get_week_items(request: Request, db_session: Session = Depends(get_db)):
+    results = db_session.execute(
+        text("""
     WITH AggregatedHistory AS (    
         SELECT 
             item_id,
@@ -82,7 +81,8 @@ def get_week_items(
     FROM RankedHistory rp
     JOIN items i ON i.id = rp.item_id
     WHERE rp.rn = 1 AND i.intent IN ('sell', 'both')
-    ORDER BY rp.weekday_num, rp.hour""").fetchall()
+    ORDER BY rp.weekday_num, rp.hour""")
+    )
 
     return [
         {
@@ -113,16 +113,14 @@ def get_week_items(
 
 
 @router.get("/today", response_model=list[TodayResponse])
-def get_today_items(
-    request: Request, db_conn: sqlite3.Connection = Depends(get_db)
-):
+def get_today_items(request: Request, db_session: Session = Depends(get_db)):
     today_weekday = (
         datetime.datetime.now().weekday() + 1
     ) % 7  # Deixando weekday igual ao do SQL
-    results = db_conn.execute(
-        """
-    WITH AggregatedHistory AS (    
-        SELECT 
+    results = db_session.execute(
+        text("""
+    WITH AggregatedHistory AS (
+        SELECT
             item_id,
             strftime('%w', timestamp, '-3 hours') AS weekday_num,
             CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
@@ -160,11 +158,11 @@ def get_today_items(
         (rp.avg_price % 10000) / 100 AS silver -- 11
     FROM RankedHistory rp
     JOIN items i ON i.id = rp.item_id
-    WHERE rp.rn = 1 AND CAST (rp.weekday_num AS INTEGER) = ? AND i.intent IN ('sell', 'both')
+    WHERE rp.rn = 1 AND CAST (rp.weekday_num AS INTEGER) = :today_weekday AND i.intent IN ('sell', 'both')
     ORDER BY rp.hour
-    """,
-        (today_weekday,),
-    ).fetchall()
+    """),
+        {"today_weekday": today_weekday},
+    )
 
     return [
         {
@@ -191,7 +189,7 @@ def get_today_items(
 @router.get("/", response_model=list[TodayItem])
 def get_items(
     request: Request,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
     order_by: str = "id",
     order: str = "desc",
     intent: Intent | None = None,
@@ -212,8 +210,8 @@ def get_items(
     elif intent == Intent.BOTH:
         intent_clause = "AND (i.intent IN ('sell', 'buy'))"
 
-    result = db_conn.execute(
-        f"""WITH latest_prices AS (
+    result = db_session.execute(
+        text(f"""WITH latest_prices AS (
                 SELECT
                     item_id,
                     price,
@@ -243,8 +241,8 @@ def get_items(
                 lp.rn = 1
                 {intent_clause}
             ORDER BY {order_by_map.get(order_by, "i.id")} {order.upper() if order.lower() in ["asc", "desc"] else "DESC"}
-        """,
-    ).fetchall()
+        """),
+    )
 
     return [
         {
@@ -269,18 +267,20 @@ def get_items(
 async def add_item(
     item_id: int,
     item_optionals: CreateItemOptions,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    result = db_conn.execute(
-        "SELECT 1 FROM items WHERE id = ?", (item_id,)
-    ).fetchone()
+    result = db_session.execute(
+        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
+    ).first()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
     try:
-        cached_item = db_conn.execute(
-            "SELECT name, blizzard_image_url, quality, rarity FROM item_cache WHERE item_id = ?",
-            (item_id,),
+        cached_item = db_session.execute(
+            text(
+                "SELECT name, blizzard_image_url, quality, rarity FROM item_cache WHERE item_id = :item_id"
+            ),
+            {"item_id": item_id},
         ).fetchone()
 
         if cached_item:
@@ -306,11 +306,19 @@ async def add_item(
             )
             img_url = img_response["assets"][0]["value"]
             item_quality = await get_item_quality(item_id, httpx_client)
-            db_conn.execute(
-                "INSERT INTO item_cache(item_id, blizzard_image_url, quality) VALUES (?, ?, ?)",
-                (item_id, img_url, item_quality),
+            db_session.execute(
+                text(
+                    "INSERT INTO item_cache(item_id, name, blizzard_image_url, quality, rarity) VALUES (:item_id, :name, :blizzard_image_url, :quality, :rarity)"
+                ),
+                {
+                    "item_id": item_id,
+                    "name": item_name,
+                    "blizzard_image_url": img_url,
+                    "quality": item_quality,
+                    "rarity": item_rarity,
+                },
             )
-            db_conn.commit()
+            db_session.commit()
 
         img_path = os.path.join("static", "images", img_url.split("/")[-1])
         await download_image(httpx_client, img_url, img_path)
@@ -329,24 +337,26 @@ async def add_item(
             notify_buy=item_optionals.notify_buy,
         )
 
-        db_conn.execute(
-            """INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold, intent, above_alert, below_alert, notify_sell, notify_buy)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                item.id,
-                item.name,
-                item.image_path,
-                item.quality,
-                item.rarity,
-                item.quantity_threshold,
-                item.intent,
-                item.above_alert,
-                item.below_alert,
-                item.notify_sell,
-                item.notify_buy,
+        db_session.execute(
+            text(
+                """INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold, intent, above_alert, below_alert, notify_sell, notify_buy)
+               VALUES (:id, :name, :image_path, :quality, :rarity, :quantity_threshold, :intent, :above_alert, :below_alert, :notify_sell, :notify_buy)"""
             ),
+            {
+                "id": item.id,
+                "name": item.name,
+                "image_path": item.image_path,
+                "quality": item.quality,
+                "rarity": item.rarity,
+                "quantity_threshold": item.quantity_threshold,
+                "intent": item.intent,
+                "above_alert": item.above_alert,
+                "below_alert": item.below_alert,
+                "notify_sell": item.notify_sell,
+                "notify_buy": item.notify_buy,
+            },
         )
-        db_conn.commit()
+        db_session.commit()
 
         return item
 
@@ -366,16 +376,17 @@ async def add_item(
 async def get_item_blizzard(
     item_id: int,
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    result = db_conn.execute(
-        "SELECT 1 FROM items WHERE id = ?", (item_id,)
+    result = db_session.execute(
+        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
     ).fetchone()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
 
-    cached_item = db_conn.execute(
-        "SELECT * FROM item_cache WHERE item_id = ?", (item_id,)
+    cached_item = db_session.execute(
+        text("SELECT * FROM item_cache WHERE item_id = :item_id"),
+        {"item_id": item_id},
     ).fetchone()
 
     if cached_item:
@@ -402,20 +413,20 @@ async def get_item_blizzard(
         img_url = img_response["assets"][0]["value"]
         item_quality = await get_item_quality(item_id, httpx_client)
 
-        db_conn.execute(
-            """
+        db_session.execute(
+            text("""
             INSERT INTO item_cache (item_id, name, blizzard_image_url, quality, rarity)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                item_id,
-                item_response["name"],
-                img_url,
-                item_quality,
-                item_response["quality"]["type"],
-            ),
+            VALUES (:item_id, :name, :blizzard_image_url, :quality, :rarity)
+            """),
+            {
+                "item_id": item_id,
+                "name": item_response["name"],
+                "blizzard_image_url": img_url,
+                "quality": item_quality,
+                "rarity": item_response["quality"]["type"],
+            },
         )
-        db_conn.commit()
+        db_session.commit()
 
         return {
             "id": item_id,
@@ -436,10 +447,10 @@ async def get_item_blizzard(
 def get_item(
     item_id: int,
     request: Request,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    item_details = db_conn.execute(
-        """SELECT
+    item_details = db_session.execute(
+        text("""SELECT
                 i.name, -- 0
                 i.image_path, -- 1
                 i.quality, -- 2
@@ -458,12 +469,12 @@ def get_item(
             JOIN
                 price_history AS ph ON i.id = ph.item_id
             WHERE
-                i.id = ?
+                i.id = :item_id
             ORDER BY
                 ph.timestamp DESC
             LIMIT 1;
-        """,
-        (item_id,),
+        """),
+        {"item_id": item_id},
     ).fetchone()
 
     if not item_details:
@@ -485,8 +496,8 @@ def get_item(
         timestamp,
     ) = item_details
 
-    price_heatmap_raw_data = db_conn.execute(
-        """
+    price_heatmap_raw_data = db_session.execute(
+        text("""
         SELECT
             CASE strftime('%w', timestamp, '-3 hours')
                 WHEN '0' THEN 'Domingo'
@@ -500,18 +511,19 @@ def get_item(
             CAST (strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
             AVG(price) / 10000.0 AS avg_price
         FROM price_history
-        WHERE item_id = ?
+        WHERE item_id = :item_id
         GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp, '-3 hours'), hour;""",
-        (item_id,),
-    ).fetchall()
+        ORDER BY strftime('%w', timestamp, '-3 hours'), hour;"""),
+        {"item_id": item_id},
+    ).all()
 
     plotly_price_heatmap_data = get_plotly_heatmap_data(
         price_heatmap_raw_data, "price"
     )
 
-    quantity_heatmap_raw_data = db_conn.execute(
-        """
+    quantity_heatmap_raw_data = db_session.execute(
+        text(
+            """
         SELECT
             CASE strftime('%w', timestamp, '-3 hours')
                 WHEN '0' THEN 'Domingo'
@@ -525,10 +537,11 @@ def get_item(
             CAST (strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
             AVG(quantity) AS avg_quantity
         FROM price_history
-        WHERE item_id = ?
+        WHERE item_id = :item_id
         GROUP BY weekday, hour
         ORDER BY strftime('%w', timestamp, '-3 hours'), hour;""",
-        (item_id,),
+        ),
+        {"item_id": item_id},
     ).fetchall()
 
     plotly_quantity_heatmap_data = get_plotly_heatmap_data(
@@ -543,8 +556,9 @@ def get_item(
     buying_diff_obj = PriceGoldSilver(gold=0, silver=0)
 
     if intent == "sell" or intent == "both":
-        selling_data = db_conn.execute(
-            """
+        selling_data = db_session.execute(
+            text(
+                """
             SELECT
                 CASE strftime('%w', timestamp, '-3 hours')
                     WHEN '0' THEN 'Domingo'
@@ -561,7 +575,7 @@ def get_item(
                 price_history
 
             WHERE
-                item_id = ?
+                item_id = :item_id
 
             GROUP BY
                 weekday,
@@ -571,8 +585,11 @@ def get_item(
                 best_avg_price DESC
 
             LIMIT 1; -- 5. Pega APENAS o primeiro resultado (o melhor) """,
-            (item_id,),
+            ),
+            {"item_id": item_id},
         ).fetchone()
+        if not selling_data:
+            selling_data = ("", 0, 0)
 
         selling_weekday, selling_hour, selling_best_avg_price = selling_data
         selling_diff = price - selling_best_avg_price
@@ -580,8 +597,8 @@ def get_item(
         selling_best_avg_obj = price_to_gold_and_silver(selling_best_avg_price)
 
     if intent == "buy" or intent == "both":
-        buying_data = db_conn.execute(
-            """
+        buying_data = db_session.execute(
+            text("""
             SELECT
                 CASE strftime('%w', timestamp, '-3 hours')
                     WHEN '0' THEN 'Domingo'
@@ -606,9 +623,11 @@ def get_item(
 
             ORDER BY
                 best_avg_price ASC
-            LIMIT 1;""",
-            (item_id,),
+            LIMIT 1;"""),
+            {"item_id": item_id},
         ).fetchone()
+        if not buying_data:
+            buying_data = ("", 0, 0)
         buying_weekday, buying_hour, buying_best_avg_price = buying_data
         buying_diff = price - buying_best_avg_price
         buying_diff_obj = price_to_gold_and_silver(buying_diff)
@@ -623,18 +642,18 @@ def get_item(
         "%Y-%m-%d %H:%M:%S"
     )
 
-    last_week_data = db_conn.execute(
-        f"""
+    last_week_data = db_session.execute(
+        text(f"""
         SELECT
             strftime('%F %T', timestamp, '-3 hours'), -- 0
             price / 10000.0, -- 1
             quantity -- 2
         FROM price_history
-        WHERE item_id = ? AND timestamp >= '{last_week_start}'
+        WHERE item_id = :item_id AND timestamp >= '{last_week_start}'
         ORDER BY timestamp DESC
         LIMIT {7 * 24};
-        """,
-        (item_id,),
+        """),
+        {"item_id": item_id},
     ).fetchall()
 
     line_chart_price_data = {
@@ -699,10 +718,12 @@ def get_item(
 def update_item(
     item_id: int,
     item_updates: EditItem,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    cursor = db_conn.execute("SELECT 1 FROM items WHERE id = ?", (item_id,))
-    if cursor.fetchone() is None:
+    result = db_session.execute(
+        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
+    ).first()
+    if result is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")
     update_data = item_updates.model_dump(exclude_unset=True)
 
@@ -723,13 +744,14 @@ def update_item(
         else:
             transformed_data[key] = value
 
-    set_clause = ", ".join((f"{key} = ?" for key in transformed_data.keys()))
-    sql_query = f"UPDATE items SET {set_clause} WHERE id = ?"
+    sql = text(
+        f"UPDATE items SET {', '.join(f'{key} = :{key}' for key in transformed_data.keys())} WHERE id = :item_id"
+    )
 
     params = list(transformed_data.values())
     params.append(item_id)
 
-    db_conn.execute(sql_query, tuple(params))
-    db_conn.commit()
+    db_session.execute(sql, {"item_id": item_id, **transformed_data})
+    db_session.commit()
 
     return {"message": "Item atualizado com sucesso"}

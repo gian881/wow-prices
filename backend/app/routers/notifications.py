@@ -1,5 +1,4 @@
 import datetime
-import sqlite3
 
 from fastapi import (
     APIRouter,
@@ -9,6 +8,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
+from sqlmodel import Session, text
 
 from app.dependencies import get_db
 from app.schemas import ErrorResponse
@@ -25,7 +25,7 @@ router = APIRouter(
     responses={500: {"model": ErrorResponse}},
 )
 async def mark_notifications_as_read(
-    notification_ids: list[int], db_conn: sqlite3.Connection = Depends(get_db)
+    notification_ids: list[int], db_session: Session = Depends(get_db)
 ):
     if not notification_ids:
         return {
@@ -34,19 +34,32 @@ async def mark_notifications_as_read(
             "unknown_notifications": [],
         }
     try:
-        placeholders = ",".join("?" * len(notification_ids))
-
-        result = db_conn.execute(
-            f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})",
-            notification_ids,
+        # Update where id in list
+        placeholders = ",".join(
+            [f":id{i}" for i in range(len(notification_ids))]
         )
-        db_conn.commit()
+        params = {
+            f"id{i}": notification_ids[i] for i in range(len(notification_ids))
+        }
 
-        updated_count = result.rowcount
+        db_session.execute(
+            text(
+                f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})"
+            ),
+            params,
+        )
 
-        existing_notifications = db_conn.execute(
-            f"SELECT id FROM notifications WHERE id IN ({placeholders})",
-            notification_ids,
+        db_session.commit()
+
+        # row_count = result.rowcount
+
+        # updated_count = result.
+
+        existing_notifications = db_session.execute(
+            text(
+                f"SELECT id FROM notifications WHERE id IN ({placeholders})",
+            ),
+            params,
         ).fetchall()
 
         existing_ids = {row[0] for row in existing_notifications}
@@ -55,35 +68,40 @@ async def mark_notifications_as_read(
 
         return {
             "status": "ok",
-            "message": f"{updated_count} notificações foram marcadas como lidas.",
+            # "message": f"{updated_count} notificações foram marcadas como lidas.",
             "unknown_notifications": unknown_ids,
         }
 
-    except sqlite3.Error as e:
-        db_conn.rollback()
-
+    except Exception as e:
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "message": f"Erro no banco de dados: {e}",
+                "message": f"Erro: {e}",
             },
         )
 
 
 @router.post("/{notification_id}/mark-read")
 async def mark_notification_as_read(
-    notification_id: int, db_conn: sqlite3.Connection = Depends(get_db)
+    notification_id: int, db_session: Session = Depends(get_db)
 ):
-    result = db_conn.execute(
-        "UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,)
-    )
-    db_conn.commit()
+    # Does the notification exists?
+    existing_notification = db_session.execute(
+        text("SELECT id FROM notifications WHERE id = :notification_id"),
+        {"notification_id": notification_id},
+    ).fetchone()
 
-    if result.rowcount == 0:
+    if not existing_notification:
         raise HTTPException(
             status_code=404, detail="Notificação não encontrada"
         )
+
+    db_session.execute(
+        text("UPDATE notifications SET read = 1 WHERE id = :notification_id"),
+        {"notification_id": notification_id},
+    )
+    db_session.commit()
 
     return {"message": "Notificação marcada como lida"}
 
@@ -91,10 +109,11 @@ async def mark_notification_as_read(
 @router.get("/")
 async def get_latest_notifications(
     request: Request,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    results = db_conn.execute("""
-        SELECT notif.id, -- 0 
+    results = db_session.execute(
+        text("""
+        SELECT notif.id, -- 0
             notif.type, -- 1
             notif.price_diff, -- 2
             notif.current_price, -- 3
@@ -111,7 +130,8 @@ async def get_latest_notifications(
         JOIN items i ON notif.item_id = i.id
         WHERE notif.read = 0
         ORDER BY notif.created_at DESC
-    """).fetchall()
+    """)
+    ).fetchall()
 
     return [
         {

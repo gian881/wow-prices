@@ -1,21 +1,20 @@
 import os
-import sqlite3
 
 import httpx
+from sqlmodel import Session, create_engine
 
 from exceptions import EnvNotSetError
 
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise EnvNotSetError("DATABASE_URL")
+
+engine = create_engine(database_url)
+
 
 def get_db():
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise EnvNotSetError("DATABASE_URL")
-
-    conn = sqlite3.connect(database_url, check_same_thread=False)
-    try:
-        yield conn
-    finally:
-        conn.close()
+    with Session(engine) as session:
+        yield session
 
 
 async def get_http_client():

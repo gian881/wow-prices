@@ -1,18 +1,16 @@
 import asyncio
 import os
-import sqlite3
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
-from dotenv import load_dotenv
-from exceptions import EnvNotSetError
+
+from app.dependencies import get_db
+from sqlmodel import Session, text
 from fastapi import HTTPException
 
 from app.blizzard_api import fetch_blizzard_api
-
-load_dotenv()
 
 
 def log(message: str) -> None:
@@ -58,11 +56,11 @@ async def notify_server(httpx_client: httpx.AsyncClient) -> None:
 
 
 async def process_data(
-    json_result, db_conn: sqlite3.Connection, httpx_client: httpx.AsyncClient
+    json_result, db_session: Session, httpx_client: httpx.AsyncClient
 ) -> None:
     log("Processing the new data")
-    db_result = db_conn.execute(
-        "SELECT id, quantity_threshold FROM items"
+    db_result = db_session.execute(
+        text("SELECT id, quantity_threshold FROM items")
     ).fetchall()
 
     threshold_map = {item_id: threshold for item_id, threshold in db_result}
@@ -96,7 +94,12 @@ async def process_data(
         )
 
         log("Saving the new data to the DB")
-        df.to_sql("price_history", con=db_conn, if_exists="append", index=False)
+        df.to_sql(
+            "price_history",
+            con=db_session.connection(),
+            if_exists="append",
+            index=False,
+        )
         try:
             await notify_server(httpx_client)
         except Exception as e:
@@ -106,20 +109,26 @@ async def process_data(
 
 
 async def run_periodic_data_fetch() -> None:
+    pass
+
     log("Initializing.")
 
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise EnvNotSetError("DATABASE_URL")
-    db_conn = sqlite3.connect(database_url)
+    db_session = next(get_db())
     client = httpx.AsyncClient(timeout=30)
 
     while True:
         try:
-            res = db_conn.execute(
-                "SELECT timestamp FROM price_history ORDER BY timestamp DESC LIMIT 1"
-            )
-            last_timestamp_str = res.fetchone()[0]
+            res = db_session.execute(
+                text(
+                    "SELECT timestamp FROM price_history ORDER BY timestamp DESC LIMIT 1"
+                ),
+            ).fetchone()
+
+            if not res:
+                last_timestamp_str = None
+            else:
+                last_timestamp_str = res[0]
+
             if last_timestamp_str:
                 naive_last_timestamp = datetime.strptime(
                     f"{last_timestamp_str}", "%Y-%m-%d %H:%M:%S"
@@ -137,7 +146,7 @@ async def run_periodic_data_fetch() -> None:
                     log("It's been more than one hour, getting new data.")
                     data = await get_data(client)
                     if data:
-                        await process_data(data, db_conn, client)
+                        await process_data(data, db_session, client)
                     await asyncio.sleep(60 * 60)  # Espera 1 hora
                 else:
                     await asyncio.sleep(1 * 60)  # Espera 1 minuto
@@ -145,7 +154,7 @@ async def run_periodic_data_fetch() -> None:
                 log("No data in price_history, fetching initial data.")
                 data = await get_data(client)
                 if data:
-                    await process_data(data, db_conn, client)
+                    await process_data(data, db_session, client)
                 await asyncio.sleep(
                     60 * 60
                 )  # Espera 1 hora após a busca inicial
