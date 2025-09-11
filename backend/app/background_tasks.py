@@ -5,12 +5,12 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
-
-from app.dependencies import get_db
-from sqlmodel import Session, text
 from fastapi import HTTPException
+from sqlmodel import Session, desc, text, select
 
 from app.blizzard_api import fetch_blizzard_api
+from app.dependencies import get_db
+from app.models import Item, PriceHistory
 
 
 def log(message: str) -> None:
@@ -59,11 +59,9 @@ async def process_data(
     json_result, db_session: Session, httpx_client: httpx.AsyncClient
 ) -> None:
     log("Processing the new data")
-    db_result = db_session.execute(
-        text("SELECT id, quantity_threshold FROM items")
-    ).fetchall()
+    db_items = db_session.exec(select(Item.id, Item.quantity_threshold)).all()
 
-    threshold_map = {item_id: threshold for item_id, threshold in db_result}
+    threshold_map = {int(item[0]): int(item[1]) for item in db_items}
     items_ids = set(threshold_map.keys())
 
     df = (
@@ -94,12 +92,16 @@ async def process_data(
         )
 
         log("Saving the new data to the DB")
+
         df.to_sql(
             "price_history",
             con=db_session.connection(),
             if_exists="append",
             index=False,
         )
+
+        db_session.commit()
+
         try:
             await notify_server(httpx_client)
         except Exception as e:
@@ -119,10 +121,10 @@ async def run_periodic_data_fetch() -> None:
     while True:
         try:
             res = db_session.execute(
-                text(
-                    "SELECT timestamp FROM price_history ORDER BY timestamp DESC LIMIT 1"
-                ),
-            ).fetchone()
+                select(PriceHistory.timestamp)
+                .order_by(desc(PriceHistory.timestamp))
+                .limit(1)
+            ).one()
 
             if not res:
                 last_timestamp_str = None

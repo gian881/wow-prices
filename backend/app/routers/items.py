@@ -10,12 +10,12 @@ from fastapi import (
     Request,
     status,
 )
-from sqlmodel import Session, text
+from sqlmodel import Session, text, select
 from unidecode import unidecode
 
-from app.dependencies import get_db, get_http_client
 from app.blizzard_api import fetch_blizzard_api
-from app.models import Item
+from app.dependencies import get_db, get_http_client
+from app.models import Item, ItemCache
 from app.schemas import (
     CreateItemOptions,
     EditItem,
@@ -44,44 +44,58 @@ router = APIRouter(
 def get_week_items(request: Request, db_session: Session = Depends(get_db)):
     results = db_session.execute(
         text("""
-    WITH AggregatedHistory AS (    
-        SELECT 
-            item_id,
-            strftime('%w', timestamp, '-3 hours') AS weekday_num,
-            CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
-            AVG(price) AS avg_price
-        FROM price_history
-        GROUP BY item_id, weekday_num, hour
-    ),
-
-    RankedHistory AS (
-        SELECT *,
-            ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY avg_price DESC) AS rn
-        FROM AggregatedHistory
-    )
-
-    SELECT
-        i.id, -- 0
-        i.name, -- 1
-        i.quality, -- 2
-        i.image_path, -- 3
-        i.rarity, -- 4
-        CASE rp.weekday_num
-            WHEN '0' THEN 'Domingo'
-            WHEN '1' THEN 'Segunda'
-            WHEN '2' THEN 'Terça'
-            WHEN '3' THEN 'Quarta'
-            WHEN '4' THEN 'Quinta'
-            WHEN '5' THEN 'Sexta'
-            ELSE 'Sábado'
-        END AS weekday, -- 5
-        rp.hour, -- 6
-        rp.avg_price / 10000 AS gold, -- 7
-        (rp.avg_price % 10000) / 100 AS silver -- 8
-    FROM RankedHistory rp
-    JOIN items i ON i.id = rp.item_id
-    WHERE rp.rn = 1 AND i.intent IN ('sell', 'both')
-    ORDER BY rp.weekday_num, rp.hour""")
+        WITH AggregatedHistory AS (
+            SELECT
+                item_id,
+                EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS weekday_num,
+                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                AVG(price) AS avg_price
+            FROM
+                price_history
+            GROUP BY
+                item_id,
+                weekday_num,
+                hour
+        ),
+        RankedHistory AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER(
+                    PARTITION BY item_id
+                    ORDER BY
+                        avg_price DESC
+                ) AS rn
+            FROM
+                AggregatedHistory
+        )
+        SELECT
+            i.id,
+            i.name,
+            i.quality,
+            i.image_path,
+            i.rarity,
+            CASE
+                WHEN rp.weekday_num = 0 THEN 'Domingo'
+                WHEN rp.weekday_num = 1 THEN 'Segunda'
+                WHEN rp.weekday_num = 2 THEN 'Terça'
+                WHEN rp.weekday_num = 3 THEN 'Quarta'
+                WHEN rp.weekday_num = 4 THEN 'Quinta'
+                WHEN rp.weekday_num = 5 THEN 'Sexta'
+                ELSE 'Sábado'
+            END AS weekday,
+            rp.hour,
+            floor(rp.avg_price / 10000) AS gold,
+            floor((rp.avg_price % 10000) / 100) AS silver
+        FROM
+            RankedHistory rp
+        JOIN items i ON i.id = rp.item_id
+        WHERE
+            rp.rn = 1
+            AND i.intent IN ('sell', 'both')
+        ORDER BY
+            rp.weekday_num,
+            rp.hour;
+        """)
     )
 
     return [
@@ -119,47 +133,61 @@ def get_today_items(request: Request, db_session: Session = Depends(get_db)):
     ) % 7  # Deixando weekday igual ao do SQL
     results = db_session.execute(
         text("""
-    WITH AggregatedHistory AS (
+        WITH AggregatedHistory AS (
+            SELECT
+                item_id,
+                EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS weekday_num,
+                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                AVG(price) AS avg_price
+            FROM
+                price_history
+            GROUP BY
+                item_id,
+                weekday_num,
+                hour
+        ),
+        RankedHistory AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER(
+                    PARTITION BY item_id
+                    ORDER BY
+                        avg_price DESC
+                ) AS rn
+            FROM
+                AggregatedHistory
+        )
         SELECT
-            item_id,
-            strftime('%w', timestamp, '-3 hours') AS weekday_num,
-            CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
-            AVG(price) AS avg_price
-        FROM price_history
-        GROUP BY item_id, weekday_num, hour
-    ),
+            i.id,
+            i.name,
+            i.quality,
+            i.image_path,
+            i.rarity,
+            i.intent,
+            i.notify_buy,
+            i.notify_sell,
+            CASE
+                WHEN rp.weekday_num = 0 THEN 'Domingo'
+                WHEN rp.weekday_num = 1 THEN 'Segunda'
+                WHEN rp.weekday_num = 2 THEN 'Terça'
+                WHEN rp.weekday_num = 3 THEN 'Quarta'
+                WHEN rp.weekday_num = 4 THEN 'Quinta'
+                WHEN rp.weekday_num = 5 THEN 'Sexta'
+                ELSE 'Sábado'
+            END AS weekday,
+            rp.hour,
+            floor(rp.avg_price / 10000) AS gold,
+            floor((rp.avg_price % 10000) / 100) AS silver
+        FROM
+            RankedHistory rp
+        JOIN items i ON i.id = rp.item_id
+        WHERE
+            rp.rn = 1
+            AND rp.weekday_num = :today_weekday
+            AND i.intent IN ('sell', 'both')
+        ORDER BY
+            rp.hour;
 
-    RankedHistory AS (
-        SELECT *,
-            ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY avg_price DESC) AS rn
-        FROM AggregatedHistory
-    )
-
-    SELECT
-        i.id, -- 0
-        i.name, -- 1
-        i.quality, -- 2
-        i.image_path, -- 3
-        i.rarity, -- 4
-        i.intent, -- 5
-        i.notify_buy, -- 6
-        i.notify_sell, -- 7
-        CASE rp.weekday_num
-            WHEN '0' THEN 'Domingo'
-            WHEN '1' THEN 'Segunda'
-            WHEN '2' THEN 'Terça'
-            WHEN '3' THEN 'Quarta'
-            WHEN '4' THEN 'Quinta'
-            WHEN '5' THEN 'Sexta'
-            ELSE 'Sábado'
-        END AS weekday, -- 8
-        rp.hour, -- 9
-        rp.avg_price / 10000 AS gold, -- 10
-        (rp.avg_price % 10000) / 100 AS silver -- 11
-    FROM RankedHistory rp
-    JOIN items i ON i.id = rp.item_id
-    WHERE rp.rn = 1 AND CAST (rp.weekday_num AS INTEGER) = :today_weekday AND i.intent IN ('sell', 'both')
-    ORDER BY rp.hour
     """),
         {"today_weekday": today_weekday},
     )
@@ -203,45 +231,51 @@ def get_items(
     }
 
     intent_clause = ""
-    if intent == Intent.SELL:
+    if intent == Intent.sell:
         intent_clause = "AND (i.intent = 'sell')"
-    elif intent == Intent.BUY:
+    elif intent == Intent.buy:
         intent_clause = "AND (i.intent = 'buy')"
-    elif intent == Intent.BOTH:
+    elif intent == Intent.both:
         intent_clause = "AND (i.intent IN ('sell', 'buy'))"
 
+    order_clause = f"{order_by_map.get(order_by, 'i.id')} {order.upper() if order.lower() in ['asc', 'desc'] else 'DESC'}"
+
     result = db_session.execute(
-        text(f"""WITH latest_prices AS (
+        text(
+            f"""
+                WITH latest_prices AS (
+                    SELECT
+                        item_id,
+                        price,
+                        quantity,
+                        "timestamp",
+                        ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY "timestamp" DESC) as rn
+                    FROM
+                        price_history
+                )
                 SELECT
-                    item_id,
-                    price,
-                    quantity,
-                    timestamp,
-                    ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) as rn
+                    i.id,
+                    i.name,
+                    i.image_path,
+                    i.quality,
+                    i.intent,
+                    i.notify_sell,
+                    i.notify_buy,
+                    i.rarity,
+                    lp.price,
+                    lp.quantity,
+                    to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
                 FROM
-                    price_history
-            )
-            SELECT
-                i.id, -- 0
-                i.name, -- 1
-                i.image_path, -- 2
-                i.quality, -- 3
-                i.intent, -- 4
-                i.notify_sell, -- 5
-                i.notify_buy, -- 6
-                i.rarity, -- 7
-                lp.price, -- 8
-                lp.quantity, -- 9
-                strftime('%Y-%m-%d %H:%M:%S', lp.timestamp, '-3 hours') -- 10
-            FROM
-                items AS i
-            JOIN
-                latest_prices AS lp ON i.id = lp.item_id
-            WHERE
-                lp.rn = 1
-                {intent_clause}
-            ORDER BY {order_by_map.get(order_by, "i.id")} {order.upper() if order.lower() in ["asc", "desc"] else "DESC"}
-        """),
+                    items AS i
+                JOIN
+                    latest_prices AS lp ON i.id = lp.item_id
+                WHERE
+                    lp.rn = 1
+                    {intent_clause}
+                ORDER BY
+                    {order_clause};
+        """,
+        ),
     )
 
     return [
@@ -276,18 +310,15 @@ async def add_item(
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
     try:
-        cached_item = db_session.execute(
-            text(
-                "SELECT name, blizzard_image_url, quality, rarity FROM item_cache WHERE item_id = :item_id"
-            ),
-            {"item_id": item_id},
-        ).fetchone()
+        cached_item = db_session.exec(
+            select(ItemCache).where(ItemCache.item_id == item_id)
+        ).first()
 
         if cached_item:
-            item_name = cached_item[0]
-            img_url = cached_item[1]
-            item_quality = cached_item[2]
-            item_rarity = cached_item[3]
+            item_name = cached_item.name
+            img_url = cached_item.blizzard_image_url
+            item_quality = cached_item.quality
+            item_rarity = cached_item.rarity
 
         else:
             item_response = await fetch_blizzard_api(
@@ -337,26 +368,9 @@ async def add_item(
             notify_buy=item_optionals.notify_buy,
         )
 
-        db_session.execute(
-            text(
-                """INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold, intent, above_alert, below_alert, notify_sell, notify_buy)
-               VALUES (:id, :name, :image_path, :quality, :rarity, :quantity_threshold, :intent, :above_alert, :below_alert, :notify_sell, :notify_buy)"""
-            ),
-            {
-                "id": item.id,
-                "name": item.name,
-                "image_path": item.image_path,
-                "quality": item.quality,
-                "rarity": item.rarity,
-                "quantity_threshold": item.quantity_threshold,
-                "intent": item.intent,
-                "above_alert": item.above_alert,
-                "below_alert": item.below_alert,
-                "notify_sell": item.notify_sell,
-                "notify_buy": item.notify_buy,
-            },
-        )
+        db_session.add(item)
         db_session.commit()
+        db_session.refresh(item)
 
         return item
 
@@ -413,18 +427,14 @@ async def get_item_blizzard(
         img_url = img_response["assets"][0]["value"]
         item_quality = await get_item_quality(item_id, httpx_client)
 
-        db_session.execute(
-            text("""
-            INSERT INTO item_cache (item_id, name, blizzard_image_url, quality, rarity)
-            VALUES (:item_id, :name, :blizzard_image_url, :quality, :rarity)
-            """),
-            {
-                "item_id": item_id,
-                "name": item_response["name"],
-                "blizzard_image_url": img_url,
-                "quality": item_quality,
-                "rarity": item_response["quality"]["type"],
-            },
+        db_session.add(
+            ItemCache(
+                item_id=item_id,
+                name=item_response["name"],
+                blizzard_image_url=img_url,
+                quality=item_quality,
+                rarity=item_response["quality"]["type"],
+            )
         )
         db_session.commit()
 
@@ -450,20 +460,21 @@ def get_item(
     db_session: Session = Depends(get_db),
 ):
     item_details = db_session.execute(
-        text("""SELECT
-                i.name, -- 0
-                i.image_path, -- 1
-                i.quality, -- 2
-                i.rarity, -- 3
-                i.intent, -- 4
-                i.quantity_threshold, -- 5
-                i.above_alert, -- 6
-                i.below_alert, -- 7
-                i.notify_sell, -- 8
-                i.notify_buy, -- 9
-                ph.price, -- 10
-                ph.quantity, -- 11
-                strftime('%Y-%m-%d %H:%M:%S', ph.timestamp, '-3 hours') -- 12
+        text("""
+            SELECT
+                i.name,
+                i.image_path,
+                i.quality,
+                i.rarity,
+                i.intent,
+                i.quantity_threshold,
+                i.above_alert,
+                i.below_alert,
+                i.notify_sell,
+                i.notify_buy,
+                ph.price,
+                ph.quantity,
+                to_char(ph."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
             FROM
                 items AS i
             JOIN
@@ -471,7 +482,7 @@ def get_item(
             WHERE
                 i.id = :item_id
             ORDER BY
-                ph.timestamp DESC
+                ph."timestamp" DESC
             LIMIT 1;
         """),
         {"item_id": item_id},
@@ -498,22 +509,23 @@ def get_item(
 
     price_heatmap_raw_data = db_session.execute(
         text("""
-        SELECT
-            CASE strftime('%w', timestamp, '-3 hours')
-                WHEN '0' THEN 'Domingo'
-                WHEN '1' THEN 'Segunda'
-                WHEN '2' THEN 'Terça'
-                WHEN '3' THEN 'Quarta'
-                WHEN '4' THEN 'Quinta'
-                WHEN '5' THEN 'Sexta'
-                WHEN '6' THEN 'Sábado'
-            END AS weekday,
-            CAST (strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
-            AVG(price) / 10000.0 AS avg_price
-        FROM price_history
-        WHERE item_id = :item_id
-        GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp, '-3 hours'), hour;"""),
+                SELECT
+                    CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        WHEN 0 THEN 'Domingo'
+                        WHEN 1 THEN 'Segunda'
+                        WHEN 2 THEN 'Terça'
+                        WHEN 3 THEN 'Quarta'
+                        WHEN 4 THEN 'Quinta'
+                        WHEN 5 THEN 'Sexta'
+                        WHEN 6 THEN 'Sábado'
+                    END AS weekday,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    AVG(price) / 10000.0 AS avg_price
+                FROM price_history
+                WHERE item_id = :item_id
+                GROUP BY weekday, hour, EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                ORDER BY EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'), hour;
+             """),
         {"item_id": item_id},
     ).all()
 
@@ -524,22 +536,30 @@ def get_item(
     quantity_heatmap_raw_data = db_session.execute(
         text(
             """
-        SELECT
-            CASE strftime('%w', timestamp, '-3 hours')
-                WHEN '0' THEN 'Domingo'
-                WHEN '1' THEN 'Segunda'
-                WHEN '2' THEN 'Terça'
-                WHEN '3' THEN 'Quarta'
-                WHEN '4' THEN 'Quinta'
-                WHEN '5' THEN 'Sexta'
-                WHEN '6' THEN 'Sábado'
-            END AS weekday,
-            CAST (strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
-            AVG(quantity) AS avg_quantity
-        FROM price_history
-        WHERE item_id = :item_id
-        GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp, '-3 hours'), hour;""",
+                SELECT
+                    CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        WHEN 0 THEN 'Domingo'
+                        WHEN 1 THEN 'Segunda'
+                        WHEN 2 THEN 'Terça'
+                        WHEN 3 THEN 'Quarta'
+                        WHEN 4 THEN 'Quinta'
+                        WHEN 5 THEN 'Sexta'
+                        WHEN 6 THEN 'Sábado'
+                    END AS weekday,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    AVG(quantity) AS avg_quantity
+                FROM
+                    price_history
+                WHERE
+                    item_id = :item_id
+                GROUP BY
+                    weekday,
+                    hour,
+                    EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                ORDER BY
+                    EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
+                    hour;
+                """,
         ),
         {"item_id": item_id},
     ).fetchall()
@@ -559,32 +579,29 @@ def get_item(
         selling_data = db_session.execute(
             text(
                 """
-            SELECT
-                CASE strftime('%w', timestamp, '-3 hours')
-                    WHEN '0' THEN 'Domingo'
-                    WHEN '1' THEN 'Segunda'
-                    WHEN '2' THEN 'Terça'
-                    WHEN '3' THEN 'Quarta'
-                    WHEN '4' THEN 'Quinta'
-                    WHEN '5' THEN 'Sexta'
-                    ELSE 'Sábado'
-                END AS weekday,
-                CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
-                AVG(price) AS best_avg_price
-            FROM
-                price_history
-
-            WHERE
-                item_id = :item_id
-
-            GROUP BY
-                weekday,
-                hour
-
-            ORDER BY
-                best_avg_price DESC
-
-            LIMIT 1; -- 5. Pega APENAS o primeiro resultado (o melhor) """,
+                    SELECT
+                        CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                            WHEN 0 THEN 'Domingo'
+                            WHEN 1 THEN 'Segunda'
+                            WHEN 2 THEN 'Terça'
+                            WHEN 3 THEN 'Quarta'
+                            WHEN 4 THEN 'Quinta'
+                            WHEN 5 THEN 'Sexta'
+                            ELSE 'Sábado'
+                        END AS weekday,
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                        AVG(price) AS best_avg_price
+                    FROM
+                        price_history
+                    WHERE
+                        item_id = :item_id
+                    GROUP BY
+                        weekday,
+                        hour
+                    ORDER BY
+                        best_avg_price DESC
+                    LIMIT 1;
+            """,
             ),
             {"item_id": item_id},
         ).fetchone()
@@ -599,31 +616,29 @@ def get_item(
     if intent == "buy" or intent == "both":
         buying_data = db_session.execute(
             text("""
-            SELECT
-                CASE strftime('%w', timestamp, '-3 hours')
-                    WHEN '0' THEN 'Domingo'
-                    WHEN '1' THEN 'Segunda'
-                    WHEN '2' THEN 'Terça'
-                    WHEN '3' THEN 'Quarta'
-                    WHEN '4' THEN 'Quinta'
-                    WHEN '5' THEN 'Sexta'
-                    ELSE 'Sábado'
-                END AS weekday,
-                CAST(strftime('%H', timestamp, '-3 hours') AS INTEGER) AS hour,
-                AVG(price) AS best_avg_price
-            FROM
-                price_history
-
-            WHERE
-                item_id = ?
-
-            GROUP BY
-                weekday,
-                hour
-
-            ORDER BY
-                best_avg_price ASC
-            LIMIT 1;"""),
+                SELECT
+                    CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        WHEN 0 THEN 'Domingo'
+                        WHEN 1 THEN 'Segunda'
+                        WHEN 2 THEN 'Terça'
+                        WHEN 3 THEN 'Quarta'
+                        WHEN 4 THEN 'Quinta'
+                        WHEN 5 THEN 'Sexta'
+                        ELSE 'Sábado'
+                    END AS weekday,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    AVG(price) AS best_avg_price
+                FROM
+                    price_history
+                WHERE
+                    item_id = :item_id
+                GROUP BY
+                    weekday,
+                    hour
+                ORDER BY
+                    best_avg_price ASC
+                LIMIT 1;
+                 """),
             {"item_id": item_id},
         ).fetchone()
         if not buying_data:
@@ -643,17 +658,24 @@ def get_item(
     )
 
     last_week_data = db_session.execute(
-        text(f"""
-        SELECT
-            strftime('%F %T', timestamp, '-3 hours'), -- 0
-            price / 10000.0, -- 1
-            quantity -- 2
-        FROM price_history
-        WHERE item_id = :item_id AND timestamp >= '{last_week_start}'
-        ORDER BY timestamp DESC
-        LIMIT {7 * 24};
+        text("""
+            SELECT
+                to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS'),
+                price / 10000.0,
+                quantity
+            FROM
+                price_history
+            WHERE
+                item_id = :item_id AND "timestamp" >= :last_week_start
+            ORDER BY
+                "timestamp" DESC
+            LIMIT :limit;
         """),
-        {"item_id": item_id},
+        {
+            "item_id": item_id,
+            "last_week_start": last_week_start,
+            "limit": 7 * 24,
+        },
     ).fetchall()
 
     line_chart_price_data = {
@@ -721,8 +743,9 @@ def update_item(
     db_session: Session = Depends(get_db),
 ):
     result = db_session.execute(
-        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
+        select(Item.id).where(Item.id == item_id)
     ).first()
+
     if result is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")
     update_data = item_updates.model_dump(exclude_unset=True)

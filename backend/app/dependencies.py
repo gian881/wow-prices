@@ -3,7 +3,10 @@ import os
 import httpx
 from sqlmodel import Session, create_engine
 
+from dotenv import load_dotenv
 from exceptions import EnvNotSetError
+
+load_dotenv()
 
 database_url = os.getenv("DATABASE_URL")
 if not database_url:

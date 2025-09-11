@@ -8,10 +8,12 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from sqlmodel import Session, text
+from sqlmodel import Session, and_, desc, select, text
 
 from app.dependencies import get_db
+from app.models import Item, Notification
 from app.schemas import ErrorResponse
+from app.utils import price_to_gold_and_silver
 
 router = APIRouter(
     prefix="/notifications",
@@ -34,7 +36,6 @@ async def mark_notifications_as_read(
             "unknown_notifications": [],
         }
     try:
-        # Update where id in list
         placeholders = ",".join(
             [f":id{i}" for i in range(len(notification_ids))]
         )
@@ -44,16 +45,12 @@ async def mark_notifications_as_read(
 
         db_session.execute(
             text(
-                f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})"
+                f"UPDATE notifications SET read = TRUE WHERE id IN ({placeholders})"
             ),
             params,
         )
 
         db_session.commit()
-
-        # row_count = result.rowcount
-
-        # updated_count = result.
 
         existing_notifications = db_session.execute(
             text(
@@ -86,21 +83,19 @@ async def mark_notifications_as_read(
 async def mark_notification_as_read(
     notification_id: int, db_session: Session = Depends(get_db)
 ):
-    # Does the notification exists?
-    existing_notification = db_session.execute(
-        text("SELECT id FROM notifications WHERE id = :notification_id"),
-        {"notification_id": notification_id},
-    ).fetchone()
+    existing_notification = db_session.exec(
+        select(Notification).where(Notification.id == notification_id)
+    ).first()
 
     if not existing_notification:
         raise HTTPException(
             status_code=404, detail="Notificação não encontrada"
         )
+    if existing_notification.read:
+        return {"message": "Notificação já está marcada como lida"}
 
-    db_session.execute(
-        text("UPDATE notifications SET read = 1 WHERE id = :notification_id"),
-        {"notification_id": notification_id},
-    )
+    existing_notification.read = True
+    db_session.add(existing_notification)
     db_session.commit()
 
     return {"message": "Notificação marcada como lida"}
@@ -111,61 +106,38 @@ async def get_latest_notifications(
     request: Request,
     db_session: Session = Depends(get_db),
 ):
-    results = db_session.execute(
-        text("""
-        SELECT notif.id, -- 0
-            notif.type, -- 1
-            notif.price_diff, -- 2
-            notif.current_price, -- 3
-            notif.price_threshold, -- 4
-            notif.item_id, -- 5
-            notif.read, -- 6
-            strftime("%Y-%m-%d %H:%M:%S", notif.created_at), -- 7
-            i.id, -- 8
-            i.name, -- 9
-            i.image_path, -- 10
-            i.quality, -- 11
-            i.rarity -- 12
-        FROM notifications notif
-        JOIN items i ON notif.item_id = i.id
-        WHERE notif.read = 0
-        ORDER BY notif.created_at DESC
-    """)
+    results = db_session.exec(
+        select(Notification, Item)
+        .where(
+            and_(Notification.read == False, Notification.item_id == Item.id)  # noqa: E712
+        )
+        .order_by(desc(Notification.created_at))
     ).fetchall()
 
     return [
         {
-            "id": row[0],
-            "type": row[1],
-            "price_diff": {
-                "gold": int(row[2]) // 10000,
-                "silver": (int(row[2]) % 10000) // 100,
-            },
-            "current_price": {
-                "gold": int(row[3]) // 10000,
-                "silver": (int(row[3]) % 10000) // 100,
-            },
+            "id": notification.id,
+            "type": notification.type,
+            "price_diff": price_to_gold_and_silver(notification.price_diff),
+            "current_price": price_to_gold_and_silver(
+                notification.current_price
+            ),
             "price_threshold": (
                 None
-                if row[4] is None
-                else {
-                    "gold": int(row[4]) // 10000,
-                    "silver": (int(row[4]) % 10000) // 100,
-                }
+                if notification.price_threshold is None
+                else price_to_gold_and_silver(notification.price_threshold)
             ),
             "item": {
-                "id": row[8],
-                "name": row[9],
-                "image": f"{request.base_url}{row[10]}",
-                "quality": row[11],
-                "rarity": row[12],
+                "id": item.id,
+                "name": item.name,
+                "image": f"{request.base_url}{item.image_path}",
+                "quality": item.quality,
+                "rarity": item.rarity,
             },
-            "read": bool(row[6]),
-            "created_at": datetime.datetime.strptime(
-                row[7], "%Y-%m-%d %H:%M:%S"
-            )
-            .replace(tzinfo=datetime.timezone.utc)
-            .isoformat(),
+            "read": notification.read,
+            "created_at": notification.created_at.replace(
+                tzinfo=datetime.timezone.utc
+            ).isoformat(),
         }
-        for row in results
+        for notification, item in results
     ]
