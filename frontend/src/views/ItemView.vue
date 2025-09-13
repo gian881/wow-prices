@@ -24,7 +24,8 @@ import {
 } from '@/components/ui/select'
 import { state as websocketState } from '@/services/websocketService'
 import { customBuyColorScale, customSellColorScale, getRelativeTime } from '@/utils'
-import Plotly from 'plotly.js-dist-min'
+// @ts-expect-error we have no types for this package
+import Plotly from 'plotly.js-cartesian-dist-min'
 import { nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -126,7 +127,7 @@ watch(
 
 watch(item, (newItem) => {
   if (newItem && newItem.average_price_data) {
-    nextTick(() => {
+    nextTick(async () => {
       Plotly.purge('priceChartDiv')
       Plotly.purge('quantityChartDiv')
       Plotly.purge('lastWeekChartDiv')

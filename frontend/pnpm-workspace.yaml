@@ -1,6 +1,8 @@
 onlyBuiltDependencies:
   - '@tailwindcss/oxide'
+  - es5-ext
   - esbuild
+  - vue-demi
 
 overrides:
   '@eslint/plugin-kit@<0.3.4': '>=0.3.4'
