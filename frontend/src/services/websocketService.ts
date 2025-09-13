@@ -5,7 +5,7 @@ export const state = reactive({
   lastMessage: null as object | null,
 })
 
-const URL = 'ws://localhost:8000/ws'
+const URL = import.meta.env.VITE_WS_BASE_URL
 let socket: WebSocket | null = null
 
 export const websocketService = {
