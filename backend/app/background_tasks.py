@@ -1,15 +1,15 @@
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
 from fastapi import HTTPException
-from sqlmodel import Session, desc, text, select
+from sqlmodel import Session, desc, select
 
 from app.blizzard_api import fetch_blizzard_api
-from app.dependencies import get_db
+from app.dependencies import engine
 from app.models import Item, PriceHistory
 
 
@@ -56,8 +56,8 @@ async def notify_server(httpx_client: httpx.AsyncClient) -> None:
 
 
 async def process_data(
-    json_result, db_session: Session, httpx_client: httpx.AsyncClient
-) -> None:
+    json_result, db_session: Session, current_timestamp: datetime
+) -> pd.DataFrame | None:
     log("Processing the new data")
     db_items = db_session.exec(select(Item.id, Item.quantity_threshold)).all()
 
@@ -87,84 +87,80 @@ async def process_data(
             .reset_index()
         )
 
-        df["timestamp"] = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        log("Saving the new data to the DB")
-
-        df.to_sql(
-            "price_history",
-            con=db_session.connection(),
-            if_exists="append",
-            index=False,
-        )
-
-        db_session.commit()
-
-        try:
-            await notify_server(httpx_client)
-        except Exception as e:
-            log(f"Failed to notify server: {e}")
+        df["timestamp"] = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        return df
     else:
-        log("No data to save after filtering.")
+        log("No data was persisted after processing.")
+        return None
+
+
+def save_data(processed_data: pd.DataFrame, db_session: Session) -> None:
+    log("Saving the new data to the DB")
+
+    processed_data.to_sql(
+        "price_history",
+        con=db_session.connection(),
+        if_exists="append",
+        index=False,
+    )
+
+    db_session.commit()
 
 
 async def run_periodic_data_fetch() -> None:
-    pass
-
     log("Initializing.")
 
-    db_session = next(get_db())
     client = httpx.AsyncClient(timeout=30)
 
+    FETCH_INTERVAL = timedelta(hours=1)
+
+    sleep_duration = 0
+
     while True:
+        if sleep_duration > 0:
+            await asyncio.sleep(sleep_duration)
+            sleep_duration = 0
         try:
-            res = db_session.execute(
-                select(PriceHistory.timestamp)
-                .order_by(desc(PriceHistory.timestamp))
-                .limit(1)
-            ).one()
+            with Session(engine) as db_session:
+                res = db_session.exec(
+                    select(PriceHistory.timestamp)
+                    .order_by(desc(PriceHistory.timestamp))
+                    .limit(1)
+                ).one_or_none()
 
-            if not res:
-                last_timestamp_str = None
-            else:
-                last_timestamp_str = res[0]
+                last_timestamp_utc = None
+                if res:
+                    last_timestamp_utc = res.replace(tzinfo=timezone.utc)
 
-            if last_timestamp_str:
-                naive_last_timestamp = datetime.strptime(
-                    f"{last_timestamp_str}", "%Y-%m-%d %H:%M:%S"
-                )
+                now_utc = datetime.now(timezone.utc)
 
-                last_timestamp = naive_last_timestamp.replace(
-                    tzinfo=timezone.utc
-                )
+                if last_timestamp_utc:
+                    time_since_last_fetch = now_utc - last_timestamp_utc
+                    if time_since_last_fetch < FETCH_INTERVAL:
+                        sleep_duration = 1 * 60  # Sleep for 1 minute
+                        continue
 
-                time_diff = datetime.now(timezone.utc) - last_timestamp
-
-                if (
-                    time_diff.total_seconds() >= 60 * 60 - 1
-                ):  # 60 minutos * 60 segundos - 1 segundo
-                    log("It's been more than one hour, getting new data.")
-                    data = await get_data(client)
-                    if data:
-                        await process_data(data, db_session, client)
-                    await asyncio.sleep(60 * 60)  # Espera 1 hora
-                else:
-                    await asyncio.sleep(1 * 60)  # Espera 1 minuto
-            else:
-                log("No data in price_history, fetching initial data.")
+                # 1 hour or more has passed, or no data found, fetch new data
+                log("Fetching new data.")
                 data = await get_data(client)
+                now_utc = datetime.now(timezone.utc)
                 if data:
-                    await process_data(data, db_session, client)
-                await asyncio.sleep(
-                    60 * 60
-                )  # Espera 1 hora após a busca inicial
+                    sleep_duration = (
+                        FETCH_INTERVAL.total_seconds()
+                    )  # Sleep for 1 hour
+                    processed_data = await process_data(
+                        data, db_session, now_utc
+                    )
+                    if processed_data is not None:
+                        save_data(processed_data, db_session)
+                        await notify_server(client)
+                    else:
+                        log("No processed data to save.")
+                else:
+                    sleep_duration = 1 * 60  # Sleep for 1 minute
+                    log("No data fetched from the API.")
         except Exception as e:
             log(f"An error occurred in the periodic task loop: {e}")
-            await asyncio.sleep(
-                2 * 60
-            )  # Espera 2 minutos antes de tentar novamente
 
 
 if __name__ == "__main__":
