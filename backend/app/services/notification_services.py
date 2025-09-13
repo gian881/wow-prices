@@ -2,11 +2,11 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, text
 
+from app.models import Notification, NotificationType
+from app.schemas import ItemForNotification
 from app.utils import price_to_gold_and_silver
 
 from ..websocket import connection_manager
-from app.models import Notification, NotificationType
-from app.schemas import ItemForNotification
 
 
 async def create_and_broadcast_notification(

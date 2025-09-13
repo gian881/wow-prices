@@ -2,7 +2,6 @@ import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
-
 import httpx
 import pandas as pd
 from fastapi import HTTPException
