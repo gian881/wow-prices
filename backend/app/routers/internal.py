@@ -1,5 +1,4 @@
 import os
-import sqlite3
 
 from fastapi import (
     APIRouter,
@@ -9,6 +8,7 @@ from fastapi import (
     Security,
 )
 from fastapi.security import APIKeyHeader
+from sqlmodel import Session
 
 from app.dependencies import get_db
 from app.services.notification_services import notify_after_update
@@ -32,9 +32,9 @@ router = APIRouter(
 async def trigger_data_update_function(
     request: Request,
     secret: str = Security(API_KEY_HEADER),
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
     if secret != INTERNAL_WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Acesso não autorizado")
 
-    await notify_after_update(db_conn, str(request.base_url))
+    await notify_after_update(db_session, str(request.base_url))

@@ -1,21 +1,19 @@
 import datetime
 import itertools
-import os
-import sqlite3
 
 import httpx
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
-    Request,
     status,
 )
+from sqlmodel import Session, select, text
 from unidecode import unidecode
 
-from app.dependencies import get_db, get_http_client
 from app.blizzard_api import fetch_blizzard_api
-from app.models import Item
+from app.dependencies import get_db, get_http_client
+from app.models import Item, ItemCache
 from app.schemas import (
     CreateItemOptions,
     EditItem,
@@ -27,7 +25,7 @@ from app.schemas import (
     WeekResponse,
 )
 from app.utils import (
-    download_image,
+    download_image_and_upload_to_supabase,
     get_item_quality,
     get_plotly_heatmap_data,
     gold_and_silver_to_price,
@@ -41,48 +39,62 @@ router = APIRouter(
 
 
 @router.get("/week", response_model=list[WeekResponse])
-def get_week_items(
-    request: Request, db_conn: sqlite3.Connection = Depends(get_db)
-):
-    results = db_conn.execute("""
-    WITH AggregatedHistory AS (    
-        SELECT 
-            item_id,
-            strftime('%w', timestamp) AS weekday_num,
-            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
-            AVG(price) AS avg_price
-        FROM price_history
-        GROUP BY item_id, weekday_num, hour
-    ),
-
-    RankedHistory AS (
-        SELECT *,
-            ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY avg_price DESC) AS rn
-        FROM AggregatedHistory
+def get_week_items(db_session: Session = Depends(get_db)):
+    results = db_session.execute(
+        text("""
+        WITH AggregatedHistory AS (
+            SELECT
+                item_id,
+                EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS weekday_num,
+                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                AVG(price) AS avg_price
+            FROM
+                price_history
+            GROUP BY
+                item_id,
+                weekday_num,
+                hour
+        ),
+        RankedHistory AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER(
+                    PARTITION BY item_id
+                    ORDER BY
+                        avg_price DESC
+                ) AS rn
+            FROM
+                AggregatedHistory
+        )
+        SELECT
+            i.id,
+            i.name,
+            i.quality,
+            i.image_path,
+            i.rarity,
+            CASE
+                WHEN rp.weekday_num = 0 THEN 'Domingo'
+                WHEN rp.weekday_num = 1 THEN 'Segunda'
+                WHEN rp.weekday_num = 2 THEN 'Terça'
+                WHEN rp.weekday_num = 3 THEN 'Quarta'
+                WHEN rp.weekday_num = 4 THEN 'Quinta'
+                WHEN rp.weekday_num = 5 THEN 'Sexta'
+                ELSE 'Sábado'
+            END AS weekday,
+            rp.hour,
+            floor(rp.avg_price / 10000) AS gold,
+            floor((rp.avg_price % 10000) / 100) AS silver
+        FROM
+            RankedHistory rp
+        JOIN items i ON i.id = rp.item_id
+        WHERE
+            rp.rn = 1
+            AND i.intent IN ('sell', 'both')
+        ORDER BY
+            rp.weekday_num,
+            rp.hour;
+        """)
     )
-
-    SELECT
-        i.id, -- 0
-        i.name, -- 1
-        i.quality, -- 2
-        i.image_path, -- 3
-        i.rarity, -- 4
-        CASE rp.weekday_num
-            WHEN '0' THEN 'Domingo'
-            WHEN '1' THEN 'Segunda'
-            WHEN '2' THEN 'Terça'
-            WHEN '3' THEN 'Quarta'
-            WHEN '4' THEN 'Quinta'
-            WHEN '5' THEN 'Sexta'
-            ELSE 'Sábado'
-        END AS weekday, -- 5
-        rp.hour, -- 6
-        rp.avg_price / 10000 AS gold, -- 7
-        (rp.avg_price % 10000) / 100 AS silver -- 8
-    FROM RankedHistory rp
-    JOIN items i ON i.id = rp.item_id
-    WHERE rp.rn = 1 AND i.intent IN ('sell', 'both')
-    ORDER BY rp.weekday_num, rp.hour""").fetchall()
 
     return [
         {
@@ -100,7 +112,7 @@ def get_week_items(
                             },
                             "quality": item[2],
                             "rarity": item[4],
-                            "image": f"{request.base_url}{item[3]}",
+                            "image": item[3],
                         }
                         for item in items
                     ],
@@ -113,58 +125,70 @@ def get_week_items(
 
 
 @router.get("/today", response_model=list[TodayResponse])
-def get_today_items(
-    request: Request, db_conn: sqlite3.Connection = Depends(get_db)
-):
+def get_today_items(db_session: Session = Depends(get_db)):
     today_weekday = (
         datetime.datetime.now().weekday() + 1
     ) % 7  # Deixando weekday igual ao do SQL
-    results = db_conn.execute(
-        """
-    WITH AggregatedHistory AS (    
-        SELECT 
-            item_id,
-            strftime('%w', timestamp) AS weekday_num,
-            CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
-            AVG(price) AS avg_price
-        FROM price_history
-        GROUP BY item_id, weekday_num, hour
-    ),
+    results = db_session.execute(
+        text("""
+        WITH AggregatedHistory AS (
+            SELECT
+                item_id,
+                EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS weekday_num,
+                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                AVG(price) AS avg_price
+            FROM
+                price_history
+            GROUP BY
+                item_id,
+                weekday_num,
+                hour
+        ),
+        RankedHistory AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER(
+                    PARTITION BY item_id
+                    ORDER BY
+                        avg_price DESC
+                ) AS rn
+            FROM
+                AggregatedHistory
+        )
+        SELECT
+            i.id,
+            i.name,
+            i.quality,
+            i.image_path,
+            i.rarity,
+            i.intent,
+            i.notify_buy,
+            i.notify_sell,
+            CASE
+                WHEN rp.weekday_num = 0 THEN 'Domingo'
+                WHEN rp.weekday_num = 1 THEN 'Segunda'
+                WHEN rp.weekday_num = 2 THEN 'Terça'
+                WHEN rp.weekday_num = 3 THEN 'Quarta'
+                WHEN rp.weekday_num = 4 THEN 'Quinta'
+                WHEN rp.weekday_num = 5 THEN 'Sexta'
+                ELSE 'Sábado'
+            END AS weekday,
+            rp.hour,
+            floor(rp.avg_price / 10000) AS gold,
+            floor((rp.avg_price % 10000) / 100) AS silver
+        FROM
+            RankedHistory rp
+        JOIN items i ON i.id = rp.item_id
+        WHERE
+            rp.rn = 1
+            AND rp.weekday_num = :today_weekday
+            AND i.intent IN ('sell', 'both')
+        ORDER BY
+            rp.hour;
 
-    RankedHistory AS (
-        SELECT *,
-            ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY avg_price DESC) AS rn
-        FROM AggregatedHistory
+    """),
+        {"today_weekday": today_weekday},
     )
-
-    SELECT
-        i.id, -- 0
-        i.name, -- 1
-        i.quality, -- 2
-        i.image_path, -- 3
-        i.rarity, -- 4
-        i.intent, -- 5
-        i.notify_buy, -- 6
-        i.notify_sell, -- 7
-        CASE rp.weekday_num
-            WHEN '0' THEN 'Domingo'
-            WHEN '1' THEN 'Segunda'
-            WHEN '2' THEN 'Terça'
-            WHEN '3' THEN 'Quarta'
-            WHEN '4' THEN 'Quinta'
-            WHEN '5' THEN 'Sexta'
-            ELSE 'Sábado'
-        END AS weekday, -- 8
-        rp.hour, -- 9
-        rp.avg_price / 10000 AS gold, -- 10
-        (rp.avg_price % 10000) / 100 AS silver -- 11
-    FROM RankedHistory rp
-    JOIN items i ON i.id = rp.item_id
-    WHERE rp.rn = 1 AND CAST (rp.weekday_num AS INTEGER) = ? AND i.intent IN ('sell', 'both')
-    ORDER BY rp.hour
-    """,
-        (today_weekday,),
-    ).fetchall()
 
     return [
         {
@@ -176,7 +200,7 @@ def get_today_items(
                     "price": {"gold": int(item[10]), "silver": int(item[11])},
                     "quality": item[2],
                     "rarity": item[4],
-                    "image": f"{request.base_url}{item[3]}",
+                    "image": item[3],
                     "intent": item[5],
                     "notify_sell": bool(item[7]),
                     "notify_buy": bool(item[6]),
@@ -190,8 +214,7 @@ def get_today_items(
 
 @router.get("/", response_model=list[TodayItem])
 def get_items(
-    request: Request,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
     order_by: str = "id",
     order: str = "desc",
     intent: Intent | None = None,
@@ -205,46 +228,52 @@ def get_items(
     }
 
     intent_clause = ""
-    if intent == Intent.SELL:
+    if intent == Intent.sell:
         intent_clause = "AND (i.intent = 'sell')"
-    elif intent == Intent.BUY:
+    elif intent == Intent.buy:
         intent_clause = "AND (i.intent = 'buy')"
-    elif intent == Intent.BOTH:
+    elif intent == Intent.both:
         intent_clause = "AND (i.intent IN ('sell', 'buy'))"
 
-    result = db_conn.execute(
-        f"""WITH latest_prices AS (
+    order_clause = f"{order_by_map.get(order_by, 'i.id')} {order.upper() if order.lower() in ['asc', 'desc'] else 'DESC'}"
+
+    result = db_session.execute(
+        text(
+            f"""
+                WITH latest_prices AS (
+                    SELECT
+                        item_id,
+                        price,
+                        quantity,
+                        "timestamp",
+                        ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY "timestamp" DESC) as rn
+                    FROM
+                        price_history
+                )
                 SELECT
-                    item_id,
-                    price,
-                    quantity,
-                    timestamp,
-                    ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) as rn
+                    i.id,
+                    i.name,
+                    i.image_path,
+                    i.quality,
+                    i.intent,
+                    i.notify_sell,
+                    i.notify_buy,
+                    i.rarity,
+                    lp.price,
+                    lp.quantity,
+                    to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
                 FROM
-                    price_history
-            )
-            SELECT
-                i.id, -- 0
-                i.name, -- 1
-                i.image_path, -- 2
-                i.quality, -- 3
-                i.intent, -- 4
-                i.notify_sell, -- 5
-                i.notify_buy, -- 6
-                i.rarity, -- 7
-                lp.price, -- 8
-                lp.quantity, -- 9
-                lp.timestamp -- 10
-            FROM
-                items AS i
-            JOIN
-                latest_prices AS lp ON i.id = lp.item_id
-            WHERE
-                lp.rn = 1
-                {intent_clause}
-            ORDER BY {order_by_map.get(order_by, "i.id")} {order.upper() if order.lower() in ["asc", "desc"] else "DESC"}
+                    items AS i
+                JOIN
+                    latest_prices AS lp ON i.id = lp.item_id
+                WHERE
+                    lp.rn = 1
+                    {intent_clause}
+                ORDER BY
+                    {order_clause};
         """,
-    ).fetchall()
+        ),
+    )
 
     return [
         {
@@ -255,7 +284,7 @@ def get_items(
                 "silver": int((item[8] / 10000 - int(item[8] / 10000)) * 100),
             },
             "quality": item[3],
-            "image": f"{request.base_url}{item[2]}",
+            "image": item[2],
             "rarity": item[7],
             "intent": item[4],
             "notify_sell": bool(item[5]),
@@ -269,25 +298,24 @@ def get_items(
 async def add_item(
     item_id: int,
     item_optionals: CreateItemOptions,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    result = db_conn.execute(
-        "SELECT 1 FROM items WHERE id = ?", (item_id,)
-    ).fetchone()
+    result = db_session.execute(
+        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
+    ).first()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
     try:
-        cached_item = db_conn.execute(
-            "SELECT name, blizzard_image_url, quality, rarity FROM item_cache WHERE item_id = ?",
-            (item_id,),
-        ).fetchone()
+        cached_item = db_session.exec(
+            select(ItemCache).where(ItemCache.item_id == item_id)
+        ).first()
 
         if cached_item:
-            item_name = cached_item[0]
-            img_url = cached_item[1]
-            item_quality = cached_item[2]
-            item_rarity = cached_item[3]
+            item_name = cached_item.name
+            img_url = cached_item.blizzard_image_url
+            item_quality = cached_item.quality
+            item_rarity = cached_item.rarity
 
         else:
             item_response = await fetch_blizzard_api(
@@ -306,19 +334,37 @@ async def add_item(
             )
             img_url = img_response["assets"][0]["value"]
             item_quality = await get_item_quality(item_id, httpx_client)
-            db_conn.execute(
-                "INSERT INTO item_cache(item_id, blizzard_image_url, quality) VALUES (?, ?, ?)",
-                (item_id, img_url, item_quality),
+            db_session.execute(
+                text(
+                    "INSERT INTO item_cache(item_id, name, blizzard_image_url, quality, rarity) VALUES (:item_id, :name, :blizzard_image_url, :quality, :rarity)"
+                ),
+                {
+                    "item_id": item_id,
+                    "name": item_name,
+                    "blizzard_image_url": img_url,
+                    "quality": item_quality,
+                    "rarity": item_rarity,
+                },
             )
-            db_conn.commit()
+            db_session.commit()
 
-        img_path = os.path.join("static", "images", img_url.split("/")[-1])
-        await download_image(httpx_client, img_url, img_path)
+        img_path = img_url.split("/")[-1]
+
+        tries = 0
+        uploaded_image_url = None
+        while tries < 3 and not uploaded_image_url:
+            tries += 1
+            uploaded_image_url = await download_image_and_upload_to_supabase(
+                httpx_client, img_url, img_path
+            )
+
+        if not uploaded_image_url:
+            uploaded_image_url = img_url  # Fallback para a URL original se o upload falhar 3 vezes
 
         item = Item(
             id=item_id,
             name=item_name,
-            image_path=img_path.replace("\\", "/"),
+            image_path=uploaded_image_url,
             quality=item_quality,
             rarity=item_rarity,
             quantity_threshold=item_optionals.quantity_threshold,
@@ -329,24 +375,9 @@ async def add_item(
             notify_buy=item_optionals.notify_buy,
         )
 
-        db_conn.execute(
-            """INSERT INTO items(id, name, image_path, quality, rarity, quantity_threshold, intent, above_alert, below_alert, notify_sell, notify_buy)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                item.id,
-                item.name,
-                item.image_path,
-                item.quality,
-                item.rarity,
-                item.quantity_threshold,
-                item.intent,
-                item.above_alert,
-                item.below_alert,
-                item.notify_sell,
-                item.notify_buy,
-            ),
-        )
-        db_conn.commit()
+        db_session.add(item)
+        db_session.commit()
+        db_session.refresh(item)
 
         return item
 
@@ -366,16 +397,17 @@ async def add_item(
 async def get_item_blizzard(
     item_id: int,
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    result = db_conn.execute(
-        "SELECT 1 FROM items WHERE id = ?", (item_id,)
+    result = db_session.execute(
+        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
     ).fetchone()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
 
-    cached_item = db_conn.execute(
-        "SELECT * FROM item_cache WHERE item_id = ?", (item_id,)
+    cached_item = db_session.execute(
+        text("SELECT * FROM item_cache WHERE item_id = :item_id"),
+        {"item_id": item_id},
     ).fetchone()
 
     if cached_item:
@@ -402,20 +434,16 @@ async def get_item_blizzard(
         img_url = img_response["assets"][0]["value"]
         item_quality = await get_item_quality(item_id, httpx_client)
 
-        db_conn.execute(
-            """
-            INSERT INTO item_cache (item_id, name, blizzard_image_url, quality, rarity)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                item_id,
-                item_response["name"],
-                img_url,
-                item_quality,
-                item_response["quality"]["type"],
-            ),
+        db_session.add(
+            ItemCache(
+                item_id=item_id,
+                name=item_response["name"],
+                blizzard_image_url=img_url,
+                quality=item_quality,
+                rarity=item_response["quality"]["type"],
+            )
         )
-        db_conn.commit()
+        db_session.commit()
 
         return {
             "id": item_id,
@@ -435,35 +463,35 @@ async def get_item_blizzard(
 @router.get("/{item_id}", response_model=ReturnItem)
 def get_item(
     item_id: int,
-    request: Request,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    item_details = db_conn.execute(
-        """SELECT
-                i.name, -- 0
-                i.image_path, -- 1
-                i.quality, -- 2
-                i.rarity, -- 3
-                i.intent, -- 4
-                i.quantity_threshold, -- 5
-                i.above_alert, -- 6
-                i.below_alert, -- 7
-                i.notify_sell, -- 8
-                i.notify_buy, -- 9
-                ph.price, -- 10
-                ph.quantity, -- 11
-                ph.timestamp -- 12
+    item_details = db_session.execute(
+        text("""
+            SELECT
+                i.name,
+                i.image_path,
+                i.quality,
+                i.rarity,
+                i.intent,
+                i.quantity_threshold,
+                i.above_alert,
+                i.below_alert,
+                i.notify_sell,
+                i.notify_buy,
+                ph.price,
+                ph.quantity,
+                to_char(ph."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
             FROM
                 items AS i
             JOIN
                 price_history AS ph ON i.id = ph.item_id
             WHERE
-                i.id = ?
+                i.id = :item_id
             ORDER BY
-                ph.timestamp DESC
+                ph."timestamp" DESC
             LIMIT 1;
-        """,
-        (item_id,),
+        """),
+        {"item_id": item_id},
     ).fetchone()
 
     if not item_details:
@@ -485,50 +513,61 @@ def get_item(
         timestamp,
     ) = item_details
 
-    price_heatmap_raw_data = db_conn.execute(
-        """
-        SELECT
-            CASE strftime('%w', timestamp)
-                WHEN '0' THEN 'Domingo'
-                WHEN '1' THEN 'Segunda'
-                WHEN '2' THEN 'Terça'
-                WHEN '3' THEN 'Quarta'
-                WHEN '4' THEN 'Quinta'
-                WHEN '5' THEN 'Sexta'
-                WHEN '6' THEN 'Sábado'
-            END AS weekday,
-            CAST (strftime('%H', timestamp) AS INTEGER) AS hour,
-            AVG(price) / 10000.0 AS avg_price
-        FROM price_history
-        WHERE item_id = ?
-        GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp), hour;""",
-        (item_id,),
-    ).fetchall()
+    price_heatmap_raw_data = db_session.execute(
+        text("""
+                SELECT
+                    CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        WHEN 0 THEN 'Domingo'
+                        WHEN 1 THEN 'Segunda'
+                        WHEN 2 THEN 'Terça'
+                        WHEN 3 THEN 'Quarta'
+                        WHEN 4 THEN 'Quinta'
+                        WHEN 5 THEN 'Sexta'
+                        WHEN 6 THEN 'Sábado'
+                    END AS weekday,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    AVG(price) / 10000.0 AS avg_price
+                FROM price_history
+                WHERE item_id = :item_id
+                GROUP BY weekday, hour, EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                ORDER BY EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'), hour;
+             """),
+        {"item_id": item_id},
+    ).all()
 
     plotly_price_heatmap_data = get_plotly_heatmap_data(
         price_heatmap_raw_data, "price"
     )
 
-    quantity_heatmap_raw_data = db_conn.execute(
-        """
-        SELECT
-            CASE strftime('%w', timestamp)
-                WHEN '0' THEN 'Domingo'
-                WHEN '1' THEN 'Segunda'
-                WHEN '2' THEN 'Terça'
-                WHEN '3' THEN 'Quarta'
-                WHEN '4' THEN 'Quinta'
-                WHEN '5' THEN 'Sexta'
-                WHEN '6' THEN 'Sábado'
-            END AS weekday,
-            CAST (strftime('%H', timestamp) AS INTEGER) AS hour,
-            AVG(quantity) AS avg_quantity
-        FROM price_history
-        WHERE item_id = ?
-        GROUP BY weekday, hour
-        ORDER BY strftime('%w', timestamp), hour;""",
-        (item_id,),
+    quantity_heatmap_raw_data = db_session.execute(
+        text(
+            """
+                SELECT
+                    CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        WHEN 0 THEN 'Domingo'
+                        WHEN 1 THEN 'Segunda'
+                        WHEN 2 THEN 'Terça'
+                        WHEN 3 THEN 'Quarta'
+                        WHEN 4 THEN 'Quinta'
+                        WHEN 5 THEN 'Sexta'
+                        WHEN 6 THEN 'Sábado'
+                    END AS weekday,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    AVG(quantity) AS avg_quantity
+                FROM
+                    price_history
+                WHERE
+                    item_id = :item_id
+                GROUP BY
+                    weekday,
+                    hour,
+                    EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                ORDER BY
+                    EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
+                    hour;
+                """,
+        ),
+        {"item_id": item_id},
     ).fetchall()
 
     plotly_quantity_heatmap_data = get_plotly_heatmap_data(
@@ -543,36 +582,37 @@ def get_item(
     buying_diff_obj = PriceGoldSilver(gold=0, silver=0)
 
     if intent == "sell" or intent == "both":
-        selling_data = db_conn.execute(
-            """
-            SELECT
-                CASE strftime('%w', timestamp)
-                    WHEN '0' THEN 'Domingo'
-                    WHEN '1' THEN 'Segunda'
-                    WHEN '2' THEN 'Terça'
-                    WHEN '3' THEN 'Quarta'
-                    WHEN '4' THEN 'Quinta'
-                    WHEN '5' THEN 'Sexta'
-                    ELSE 'Sábado'
-                END AS weekday,
-                CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
-                AVG(price) AS best_avg_price
-            FROM
-                price_history
-
-            WHERE
-                item_id = ?
-
-            GROUP BY
-                weekday,
-                hour
-
-            ORDER BY
-                best_avg_price DESC
-
-            LIMIT 1; -- 5. Pega APENAS o primeiro resultado (o melhor) """,
-            (item_id,),
+        selling_data = db_session.execute(
+            text(
+                """
+                    SELECT
+                        CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                            WHEN 0 THEN 'Domingo'
+                            WHEN 1 THEN 'Segunda'
+                            WHEN 2 THEN 'Terça'
+                            WHEN 3 THEN 'Quarta'
+                            WHEN 4 THEN 'Quinta'
+                            WHEN 5 THEN 'Sexta'
+                            ELSE 'Sábado'
+                        END AS weekday,
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                        AVG(price) AS best_avg_price
+                    FROM
+                        price_history
+                    WHERE
+                        item_id = :item_id
+                    GROUP BY
+                        weekday,
+                        hour
+                    ORDER BY
+                        best_avg_price DESC
+                    LIMIT 1;
+            """,
+            ),
+            {"item_id": item_id},
         ).fetchone()
+        if not selling_data:
+            selling_data = ("", 0, 0)
 
         selling_weekday, selling_hour, selling_best_avg_price = selling_data
         selling_diff = price - selling_best_avg_price
@@ -580,35 +620,35 @@ def get_item(
         selling_best_avg_obj = price_to_gold_and_silver(selling_best_avg_price)
 
     if intent == "buy" or intent == "both":
-        buying_data = db_conn.execute(
-            """
-            SELECT
-                CASE strftime('%w', timestamp)
-                    WHEN '0' THEN 'Domingo'
-                    WHEN '1' THEN 'Segunda'
-                    WHEN '2' THEN 'Terça'
-                    WHEN '3' THEN 'Quarta'
-                    WHEN '4' THEN 'Quinta'
-                    WHEN '5' THEN 'Sexta'
-                    ELSE 'Sábado'
-                END AS weekday,
-                CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
-                AVG(price) AS best_avg_price
-            FROM
-                price_history
-
-            WHERE
-                item_id = ?
-
-            GROUP BY
-                weekday,
-                hour
-
-            ORDER BY
-                best_avg_price ASC
-            LIMIT 1;""",
-            (item_id,),
+        buying_data = db_session.execute(
+            text("""
+                SELECT
+                    CASE EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        WHEN 0 THEN 'Domingo'
+                        WHEN 1 THEN 'Segunda'
+                        WHEN 2 THEN 'Terça'
+                        WHEN 3 THEN 'Quarta'
+                        WHEN 4 THEN 'Quinta'
+                        WHEN 5 THEN 'Sexta'
+                        ELSE 'Sábado'
+                    END AS weekday,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    AVG(price) AS best_avg_price
+                FROM
+                    price_history
+                WHERE
+                    item_id = :item_id
+                GROUP BY
+                    weekday,
+                    hour
+                ORDER BY
+                    best_avg_price ASC
+                LIMIT 1;
+                 """),
+            {"item_id": item_id},
         ).fetchone()
+        if not buying_data:
+            buying_data = ("", 0, 0)
         buying_weekday, buying_hour, buying_best_avg_price = buying_data
         buying_diff = price - buying_best_avg_price
         buying_diff_obj = price_to_gold_and_silver(buying_diff)
@@ -618,23 +658,30 @@ def get_item(
     above_obj = price_to_gold_and_silver(above_alert)
     below_obj = price_to_gold_and_silver(below_alert)
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
     last_week_start = (now - datetime.timedelta(days=7)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
-    last_week_data = db_conn.execute(
-        f"""
-        SELECT
-            strftime('%F %T', timestamp), -- 0
-            price / 10000.0, -- 1
-            quantity -- 2
-        FROM price_history
-        WHERE item_id = ? AND timestamp >= '{last_week_start}'
-        ORDER BY timestamp DESC
-        LIMIT {7 * 24};
-        """,
-        (item_id,),
+    last_week_data = db_session.execute(
+        text("""
+            SELECT
+                to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS'),
+                price / 10000.0,
+                quantity
+            FROM
+                price_history
+            WHERE
+                item_id = :item_id AND "timestamp" >= :last_week_start
+            ORDER BY
+                "timestamp" DESC
+            LIMIT :limit;
+        """),
+        {
+            "item_id": item_id,
+            "last_week_start": last_week_start,
+            "limit": 7 * 24,
+        },
     ).fetchall()
 
     line_chart_price_data = {
@@ -652,7 +699,7 @@ def get_item(
         "name": name,
         "quality": quality,
         "rarity": rarity,
-        "image": f"{request.base_url}{image_path}",
+        "image": image_path,
         "intent": intent,
         "quantity_threshold": quantity_threshold,
         "notify_sell": bool(notify_sell),
@@ -699,10 +746,13 @@ def get_item(
 def update_item(
     item_id: int,
     item_updates: EditItem,
-    db_conn: sqlite3.Connection = Depends(get_db),
+    db_session: Session = Depends(get_db),
 ):
-    cursor = db_conn.execute("SELECT 1 FROM items WHERE id = ?", (item_id,))
-    if cursor.fetchone() is None:
+    result = db_session.execute(
+        select(Item.id).where(Item.id == item_id)
+    ).first()
+
+    if result is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")
     update_data = item_updates.model_dump(exclude_unset=True)
 
@@ -718,18 +768,17 @@ def update_item(
             transformed_data[key] = gold_and_silver_to_price(value)
         elif key == "intent":
             transformed_data[key] = value.value
-        elif key in ["notify_sell", "notify_buy"]:
-            transformed_data[key] = int(value)
         else:
             transformed_data[key] = value
 
-    set_clause = ", ".join((f"{key} = ?" for key in transformed_data.keys()))
-    sql_query = f"UPDATE items SET {set_clause} WHERE id = ?"
+    sql = text(
+        f"UPDATE items SET {', '.join(f'{key} = :{key}' for key in transformed_data.keys())} WHERE id = :item_id"
+    )
 
     params = list(transformed_data.values())
     params.append(item_id)
 
-    db_conn.execute(sql_query, tuple(params))
-    db_conn.commit()
+    db_session.execute(sql, {"item_id": item_id, **transformed_data})
+    db_session.commit()
 
     return {"message": "Item atualizado com sucesso"}

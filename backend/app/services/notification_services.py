@@ -1,15 +1,16 @@
-import datetime
-import sqlite3
+from datetime import datetime, timezone
 
+from sqlmodel import Session, text
+
+from app.models import Notification, NotificationType
+from app.schemas import ItemForNotification
 from app.utils import price_to_gold_and_silver
 
 from ..websocket import connection_manager
-from app.models import NotificationType
-from app.schemas import ItemForNotification
 
 
 async def create_and_broadcast_notification(
-    db_conn: sqlite3.Connection,
+    db_session: Session,
     base_url: str,
     item: ItemForNotification,
     notification_type: NotificationType,
@@ -17,28 +18,27 @@ async def create_and_broadcast_notification(
     price_diff: int,
     price_threshold: int | None = None,
 ):
-    print("Notification:", item.name, notification_type.value)
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")[:-3]
+    now = datetime.now(timezone.utc)
 
-    db_conn.execute(
-        """
-        INSERT INTO notifications(type, price_diff, current_price, price_threshold, item_id, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            notification_type.value,
-            price_diff,
-            current_price,
-            price_threshold,
-            item.id,
-            now,
-        ),
+    notification = Notification(
+        type=notification_type,
+        price_diff=price_diff,
+        current_price=current_price,
+        price_threshold=price_threshold,
+        item_id=item.id,
+        created_at=now,
     )
-    db_conn.commit()
 
-    notification_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[
-        0
-    ]
+    db_session.add(notification)
+    db_session.commit()
+    db_session.refresh(notification)
+
+    notification_id = notification.id
+
+    if notification_id is None:
+        print("Erro ao obter o ID da notificação inserida.")
+        return
+
     price_diff_obj = price_to_gold_and_silver(price_diff)
     current_price_obj = price_to_gold_and_silver(current_price)
 
@@ -67,15 +67,16 @@ async def create_and_broadcast_notification(
                 "rarity": item.rarity,
             },
             "read": False,
-            "created_at": now,
+            "created_at": now.isoformat(),
         },
     }
 
     await connection_manager.broadcast(message)
 
 
-async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
-    items_to_notify = db_conn.execute("""
+async def notify_price_below(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
         WITH latest_prices AS
         (SELECT item_id,
                 price,
@@ -96,7 +97,8 @@ async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
         AND lp.price < i.below_alert
         AND i.below_alert > 0
         ORDER BY lp.price DESC
-    """).fetchall()
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -110,7 +112,7 @@ async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -119,15 +121,16 @@ async def notify_price_below(db_conn: sqlite3.Connection, base_url: str):
                 quality=quality,
                 rarity=rarity,
             ),
-            NotificationType.PRICE_BELOW_ALERT,
+            NotificationType.price_below_alert,
             current_price,
             abs(current_price - price_threshold),
             price_threshold,
         )
 
 
-async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
-    items_to_notify = db_conn.execute("""
+async def notify_price_above(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
        WITH latest_prices AS
         (SELECT item_id,
                 price,
@@ -148,7 +151,8 @@ async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
         AND lp.price > i.above_alert
         AND i.above_alert > 0
         ORDER BY lp.price DESC
-    """).fetchall()
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -162,7 +166,7 @@ async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -171,34 +175,43 @@ async def notify_price_above(db_conn: sqlite3.Connection, base_url: str):
                 quality=quality,
                 rarity=rarity,
             ),
-            NotificationType.PRICE_ABOVE_ALERT,
+            NotificationType.price_above_alert,
             current_price,
             abs(current_price - price_threshold),
             price_threshold,
         )
 
 
-async def notify_price_below_best_avg(
-    db_conn: sqlite3.Connection, base_url: str
-):
-    items_to_notify = db_conn.execute("""
+async def notify_price_below_best_avg(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
         WITH latest_prices AS (
-            -- Pega o preço mais recente de cada item
-            SELECT item_id, price, ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
-            FROM price_history
+            SELECT
+                item_id,
+                price,
+                ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY "timestamp" DESC) AS rn
+            FROM
+                price_history
         ),
         lowest_avg_prices AS (
-            -- Calcula a menor média de preço histórica para cada item
-            SELECT item_id, MIN(avg_price) as min_avg_price
-            FROM (
-                -- Primeiro, calcula a média para cada dia/hora
-                SELECT item_id, AVG(price) as avg_price
-                FROM price_history
-                GROUP BY item_id, strftime('%w', timestamp), strftime('%H', timestamp)
-            )
-            GROUP BY item_id
+            SELECT
+                item_id,
+                MIN(avg_price) as min_avg_price
+            FROM
+                (
+                    SELECT
+                        item_id,
+                        AVG(price) as avg_price
+                    FROM
+                        price_history
+                    GROUP BY
+                        item_id,
+                        EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                ) AS daily_averages
+            GROUP BY
+                item_id
         )
-        -- Junta tudo e filtra os itens que atendem à condição
         SELECT
             i.id,
             i.name,
@@ -207,15 +220,17 @@ async def notify_price_below_best_avg(
             i.rarity,
             lp.price AS current_price,
             lap.min_avg_price
-        FROM items i
+        FROM
+            items i
         JOIN latest_prices lp ON i.id = lp.item_id
         JOIN lowest_avg_prices lap ON i.id = lap.item_id
         WHERE
-            (i.intent = 'buy' OR i.intent = 'both') -- Considera apenas itens que são para compra
-            AND i.notify_buy = 1 -- Considera apenas itens que têm notificação de compra ativada
-            AND lp.rn = 1 -- Garante que estamos usando o preço mais recente
-            AND lp.price < lap.min_avg_price -- A condição principal da notificação!
-    """).fetchall()
+            (i.intent = 'buy' OR i.intent = 'both')
+            AND i.notify_buy = TRUE
+            AND lp.rn = 1
+            AND lp.price < lap.min_avg_price;
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -229,7 +244,7 @@ async def notify_price_below_best_avg(
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -238,32 +253,42 @@ async def notify_price_below_best_avg(
                 quality=quality,
                 rarity=rarity,
             ),
-            NotificationType.PRICE_BELOW_BEST_AVG_ALERT,
+            NotificationType.price_below_best_avg_alert,
             current_price,
             abs(current_price - min_avg_price),
         )
 
 
-async def notify_price_above_best_avg(
-    db_conn: sqlite3.Connection, base_url: str
-):
-    items_to_notify = db_conn.execute("""
+async def notify_price_above_best_avg(db_session: Session, base_url: str):
+    items_to_notify = db_session.execute(
+        text("""
         WITH latest_prices AS (
-            SELECT item_id, price, ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY timestamp DESC) AS rn
-            FROM price_history
+            SELECT
+                item_id,
+                price,
+                ROW_NUMBER() OVER(PARTITION BY item_id ORDER BY "timestamp" DESC) AS rn
+            FROM
+                price_history
         ),
         highest_avg_prices AS (
-            -- Calcula a MAIOR média de preço histórica para cada item
-            SELECT item_id, MAX(avg_price) as max_avg_price
-            FROM (
-                -- Primeiro, calcula a média para cada dia/hora
-                SELECT item_id, AVG(price) as avg_price
-                FROM price_history
-                GROUP BY item_id, strftime('%w', timestamp), strftime('%H', timestamp)
-            )
-            GROUP BY item_id
+            SELECT
+                item_id,
+                MAX(avg_price) as max_avg_price
+            FROM
+                (
+                    SELECT
+                        item_id,
+                        AVG(price) as avg_price
+                    FROM
+                        price_history
+                    GROUP BY
+                        item_id,
+                        EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                ) AS daily_averages
+            GROUP BY
+                item_id
         )
-        -- Junta tudo e filtra os itens que atendem à condição
         SELECT
             i.id,
             i.name,
@@ -272,15 +297,17 @@ async def notify_price_above_best_avg(
             i.rarity,
             lp.price AS current_price,
             lap.max_avg_price
-        FROM items i
+        FROM
+            items i
         JOIN latest_prices lp ON i.id = lp.item_id
         JOIN highest_avg_prices lap ON i.id = lap.item_id
         WHERE
-            (i.intent = 'sell' OR i.intent = 'both') -- Considera apenas itens que são para venda
-            AND i.notify_sell = 1 -- Considera apenas itens que têm notificação de venda ativada
-            AND lp.rn = 1 -- Garante que estamos usando o preço mais recente
-            AND lp.price > lap.max_avg_price -- A condição principal da notificação!
-    """).fetchall()
+            (i.intent = 'sell' OR i.intent = 'both')
+            AND i.notify_sell = TRUE
+            AND lp.rn = 1
+            AND lp.price > lap.max_avg_price;
+    """)
+    ).fetchall()
 
     for item in items_to_notify:
         (
@@ -294,7 +321,7 @@ async def notify_price_above_best_avg(
         ) = item
 
         await create_and_broadcast_notification(
-            db_conn,
+            db_session,
             base_url,
             ItemForNotification(
                 id=item_id,
@@ -303,24 +330,22 @@ async def notify_price_above_best_avg(
                 quality=quality,
                 rarity=rarity,
             ),
-            NotificationType.PRICE_ABOVE_BEST_AVG_ALERT,
+            NotificationType.price_above_best_avg_alert,
             current_price,
             abs(current_price - max_avg_price),
         )
 
 
-async def notify_after_update(db_conn: sqlite3.Connection, base_url: str):
+async def notify_after_update(db_session: Session, base_url: str):
     await connection_manager.broadcast(
         {
             "action": "new_data",
             "data": {
-                "timestamp": datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         }
     )
-    await notify_price_below(db_conn, base_url)
-    await notify_price_above(db_conn, base_url)
-    await notify_price_below_best_avg(db_conn, base_url)
-    await notify_price_above_best_avg(db_conn, base_url)
+    await notify_price_below(db_session, base_url)
+    await notify_price_above(db_session, base_url)
+    await notify_price_below_best_avg(db_session, base_url)
+    await notify_price_above_best_avg(db_session, base_url)

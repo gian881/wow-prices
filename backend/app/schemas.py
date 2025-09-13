@@ -4,9 +4,9 @@ from pydantic import BaseModel
 
 
 class Intent(Enum):
-    SELL = "sell"
-    BUY = "buy"
-    BOTH = "both"
+    sell = "sell"
+    buy = "buy"
+    both = "both"
 
 
 class Weekday(Enum):
@@ -20,10 +20,21 @@ class Weekday(Enum):
 
 
 class NotificationType(Enum):
-    PRICE_ABOVE_ALERT = "price_above_alert"
-    PRICE_BELOW_ALERT = "price_below_alert"
-    PRICE_ABOVE_BEST_AVG_ALERT = "price_above_best_avg_alert"
-    PRICE_BELOW_BEST_AVG_ALERT = "price_below_best_avg_alert"
+    price_above_alert = "price_above_alert"
+    price_below_alert = "price_below_alert"
+    price_above_best_avg_alert = "price_above_best_avg_alert"
+    price_below_best_avg_alert = "price_below_best_avg_alert"
+
+
+class Rarity(Enum):
+    POOR = "POOR"
+    COMMON = "COMMON"
+    UNCOMMON = "UNCOMMON"
+    RARE = "RARE"
+    EPIC = "EPIC"
+    LEGENDARY = "LEGENDARY"
+    ARTIFACT = "ARTIFACT"
+    HEIRLOOM = "HEIRLOOM"
 
 
 class Sign(Enum):
@@ -49,7 +60,7 @@ class ErrorResponse(BaseModel):
 
 class CreateItemOptions(BaseModel):
     quantity_threshold: int = 100
-    intent: Intent = Intent.SELL
+    intent: Intent = Intent.sell
     above_alert: PriceGoldSilver = PriceGoldSilver(gold=0, silver=0)
     below_alert: PriceGoldSilver = PriceGoldSilver(gold=0, silver=0)
     notify_sell: bool = False
