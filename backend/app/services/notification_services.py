@@ -207,7 +207,7 @@ async def notify_price_below_best_avg(db_session: Session, base_url: str):
                     GROUP BY
                         item_id,
                         EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
-                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer
                 ) AS daily_averages
             GROUP BY
                 item_id
@@ -284,7 +284,7 @@ async def notify_price_above_best_avg(db_session: Session, base_url: str):
                     GROUP BY
                         item_id,
                         EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
-                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer
                 ) AS daily_averages
             GROUP BY
                 item_id

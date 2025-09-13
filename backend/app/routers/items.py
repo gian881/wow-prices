@@ -46,7 +46,7 @@ def get_week_items(db_session: Session = Depends(get_db)):
             SELECT
                 item_id,
                 EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS weekday_num,
-                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer AS hour,
                 AVG(price) AS avg_price
             FROM
                 price_history
@@ -135,7 +135,7 @@ def get_today_items(db_session: Session = Depends(get_db)):
             SELECT
                 item_id,
                 EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS weekday_num,
-                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer AS hour,
                 AVG(price) AS avg_price
             FROM
                 price_history
@@ -525,7 +525,7 @@ def get_item(
                         WHEN 5 THEN 'Sexta'
                         WHEN 6 THEN 'Sábado'
                     END AS weekday,
-                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer AS hour,
                     AVG(price) / 10000.0 AS avg_price
                 FROM price_history
                 WHERE item_id = :item_id
@@ -552,7 +552,7 @@ def get_item(
                         WHEN 5 THEN 'Sexta'
                         WHEN 6 THEN 'Sábado'
                     END AS weekday,
-                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer AS hour,
                     AVG(quantity) AS avg_quantity
                 FROM
                     price_history
@@ -595,7 +595,7 @@ def get_item(
                             WHEN 5 THEN 'Sexta'
                             ELSE 'Sábado'
                         END AS weekday,
-                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer AS hour,
                         AVG(price) AS best_avg_price
                     FROM
                         price_history
@@ -632,7 +632,7 @@ def get_item(
                         WHEN 5 THEN 'Sexta'
                         ELSE 'Sábado'
                     END AS weekday,
-                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo') AS hour,
+                    EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer AS hour,
                     AVG(price) AS best_avg_price
                 FROM
                     price_history
@@ -686,7 +686,7 @@ def get_item(
 
     line_chart_price_data = {
         "x": [data[0] for data in last_week_data],
-        "y": [data[1] for data in last_week_data],
+        "y": [float(data[1]) for data in last_week_data],
     }
 
     line_chart_quantity_data = {
