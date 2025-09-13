@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+import os
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -28,9 +29,7 @@ app.include_router(notifications.router)
 app.include_router(internal.router)
 app.include_router(websocket.router)
 
-origins = [
-    "http://localhost:5173",
-]
+origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
 app.add_middleware(
     CORSMiddleware,
