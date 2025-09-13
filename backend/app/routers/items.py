@@ -27,7 +27,7 @@ from app.schemas import (
     WeekResponse,
 )
 from app.utils import (
-    download_image,
+    download_image_and_upload_to_supabase,
     get_item_quality,
     get_plotly_heatmap_data,
     gold_and_silver_to_price,
@@ -351,13 +351,23 @@ async def add_item(
             )
             db_session.commit()
 
-        img_path = os.path.join("static", "images", img_url.split("/")[-1])
-        await download_image(httpx_client, img_url, img_path)
+        img_path = img_url.split("/")[-1]
+
+        tries = 0
+        uploaded_image_url = None
+        while tries < 3 and not uploaded_image_url:
+            tries += 1
+            uploaded_image_url = await download_image_and_upload_to_supabase(
+                httpx_client, img_url, img_path
+            )
+
+        if not uploaded_image_url:
+            uploaded_image_url = img_url  # Fallback para a URL original se o upload falhar 3 vezes
 
         item = Item(
             id=item_id,
             name=item_name,
-            image_path=img_path.replace("\\", "/"),
+            image_path=uploaded_image_url,
             quality=item_quality,
             rarity=item_rarity,
             quantity_threshold=item_optionals.quantity_threshold,

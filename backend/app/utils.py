@@ -8,8 +8,20 @@ import pandas as pd
 from bs4 import BeautifulSoup, Tag
 from PIL import Image
 from sqlalchemy import Row
+from supabase import Client, create_client
 
 from app.schemas import PriceGoldSilver
+from exceptions import EnvNotSetError
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+if not SUPABASE_URL:
+    raise EnvNotSetError("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+if not SUPABASE_KEY:
+    raise EnvNotSetError("SUPABASE_KEY")
+
+supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+BUCKET_NAME = "images"
 
 
 def price_to_gold_and_silver(price: int | float) -> PriceGoldSilver:
@@ -34,16 +46,30 @@ def gold_and_silver_to_price(
     )
 
 
-async def download_image(
-    httpx_client: httpx.AsyncClient, url: str, file_path: str
+async def download_image_and_upload_to_supabase(
+    httpx_client: httpx.AsyncClient, url: str, file_name: str
 ):
-    if os.path.exists(file_path):
-        return
-    img_response = await httpx_client.get(url)
-
-    if img_response.status_code == 200:
-        img = Image.open(BytesIO(img_response.content))
-        img.save(file_path)
+    try:
+        img_response = await httpx_client.get(url)
+        img_response.raise_for_status()
+        supabase_client.storage.from_(BUCKET_NAME).upload(
+            file_name, img_response.content
+        )
+        public_url = supabase_client.storage.from_(BUCKET_NAME).get_public_url(
+            file_name
+        )
+        return public_url
+    except httpx.HTTPStatusError as e:
+        print(f"Failed to download image: {e}")
+        return None
+    except Exception as e:
+        if "duplicate" in str(e).lower():
+            print("Image already exists in Supabase, getting public URL.")
+            return supabase_client.storage.from_(BUCKET_NAME).get_public_url(
+                file_name
+            )
+        else:
+            raise e
 
 
 async def get_item_quality(
