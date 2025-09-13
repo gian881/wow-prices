@@ -1,17 +1,20 @@
 import json
 import os
+from datetime import datetime
 from io import BytesIO
 from typing import Any, Sequence
+from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup, Tag
 from PIL import Image
 from sqlalchemy import Row
-from supabase import Client, create_client
 
+from app.blizzard_api import fetch_blizzard_api
 from app.schemas import PriceGoldSilver
 from exceptions import EnvNotSetError
+from supabase import Client, create_client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 if not SUPABASE_URL:
@@ -22,6 +25,11 @@ if not SUPABASE_KEY:
 
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "images"
+
+
+def log(message: str) -> None:
+    now = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    print(f"{now.strftime('[%d/%m/%Y] [%H:%M:%S]')} {message}")
 
 
 def price_to_gold_and_silver(price: int | float) -> PriceGoldSilver:
@@ -129,3 +137,23 @@ def get_plotly_heatmap_data(
         "y": [f"{str(hour).zfill(2)}h" for hour in heatmap_data_json["index"]],
         "z": heatmap_data_json["data"],
     }
+
+
+async def get_item_blizzard_image_url(
+    httpx_client: httpx.AsyncClient, item_id: int
+) -> str | None:
+    try:
+        item_response = await fetch_blizzard_api(
+            f"https://us.api.blizzard.com/data/wow/item/{item_id}",
+            httpx_client,
+            {"namespace": "static-us", "locale": "pt_BR"},
+            "Item",
+        )
+        img_response = await fetch_blizzard_api(
+            item_response["media"]["key"]["href"],
+            httpx_client,
+        )
+        return img_response["assets"][0]["value"]
+    except Exception as e:
+        print(f"Failed to get Blizzard image URL for item {item_id}: {e}")
+        return None

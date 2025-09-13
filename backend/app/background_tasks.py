@@ -1,7 +1,7 @@
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+
 
 import httpx
 import pandas as pd
@@ -11,11 +11,7 @@ from sqlmodel import Session, desc, select
 from app.blizzard_api import fetch_blizzard_api
 from app.dependencies import engine
 from app.models import Item, PriceHistory
-
-
-def log(message: str) -> None:
-    now = datetime.now(ZoneInfo("America/Sao_Paulo"))
-    print(f"{now.strftime('[%d/%m/%Y] [%H:%M:%S]')} {message}")
+from app.utils import log
 
 
 async def get_data(httpx_client: httpx.AsyncClient):

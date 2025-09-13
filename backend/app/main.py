@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import websocket
 from app.background_tasks import run_periodic_data_fetch
+from app.startup_tasks import verify_images_on_startup
 
 load_dotenv()
 
@@ -19,6 +20,7 @@ from .routers import internal, items, notifications  # noqa: E402
 async def lifespan(app: FastAPI):
     print("Servidor iniciando: Iniciando a tarefa de busca de dados periódica.")
     asyncio.create_task(run_periodic_data_fetch())
+    asyncio.create_task(verify_images_on_startup())
     yield
     print("Servidor desligando.")
 

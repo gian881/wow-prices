@@ -4,7 +4,6 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
-    Request,
     status,
 )
 from fastapi.responses import JSONResponse
@@ -103,7 +102,6 @@ async def mark_notification_as_read(
 
 @router.get("/")
 async def get_latest_notifications(
-    request: Request,
     db_session: Session = Depends(get_db),
 ):
     results = db_session.exec(
@@ -130,7 +128,7 @@ async def get_latest_notifications(
             "item": {
                 "id": item.id,
                 "name": item.name,
-                "image": f"{request.base_url}{item.image_path}",
+                "image": item.image_path,
                 "quality": item.quality,
                 "rarity": item.rarity,
             },

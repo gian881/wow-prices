@@ -1,16 +1,14 @@
 import datetime
 import itertools
-import os
 
 import httpx
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
-    Request,
     status,
 )
-from sqlmodel import Session, text, select
+from sqlmodel import Session, select, text
 from unidecode import unidecode
 
 from app.blizzard_api import fetch_blizzard_api
@@ -41,7 +39,7 @@ router = APIRouter(
 
 
 @router.get("/week", response_model=list[WeekResponse])
-def get_week_items(request: Request, db_session: Session = Depends(get_db)):
+def get_week_items(db_session: Session = Depends(get_db)):
     results = db_session.execute(
         text("""
         WITH AggregatedHistory AS (
@@ -114,7 +112,7 @@ def get_week_items(request: Request, db_session: Session = Depends(get_db)):
                             },
                             "quality": item[2],
                             "rarity": item[4],
-                            "image": f"{request.base_url}{item[3]}",
+                            "image": item[3],
                         }
                         for item in items
                     ],
@@ -127,7 +125,7 @@ def get_week_items(request: Request, db_session: Session = Depends(get_db)):
 
 
 @router.get("/today", response_model=list[TodayResponse])
-def get_today_items(request: Request, db_session: Session = Depends(get_db)):
+def get_today_items(db_session: Session = Depends(get_db)):
     today_weekday = (
         datetime.datetime.now().weekday() + 1
     ) % 7  # Deixando weekday igual ao do SQL
@@ -202,7 +200,7 @@ def get_today_items(request: Request, db_session: Session = Depends(get_db)):
                     "price": {"gold": int(item[10]), "silver": int(item[11])},
                     "quality": item[2],
                     "rarity": item[4],
-                    "image": f"{request.base_url}{item[3]}",
+                    "image": item[3],
                     "intent": item[5],
                     "notify_sell": bool(item[7]),
                     "notify_buy": bool(item[6]),
@@ -216,7 +214,6 @@ def get_today_items(request: Request, db_session: Session = Depends(get_db)):
 
 @router.get("/", response_model=list[TodayItem])
 def get_items(
-    request: Request,
     db_session: Session = Depends(get_db),
     order_by: str = "id",
     order: str = "desc",
@@ -287,7 +284,7 @@ def get_items(
                 "silver": int((item[8] / 10000 - int(item[8] / 10000)) * 100),
             },
             "quality": item[3],
-            "image": f"{request.base_url}{item[2]}",
+            "image": item[2],
             "rarity": item[7],
             "intent": item[4],
             "notify_sell": bool(item[5]),
@@ -466,7 +463,6 @@ async def get_item_blizzard(
 @router.get("/{item_id}", response_model=ReturnItem)
 def get_item(
     item_id: int,
-    request: Request,
     db_session: Session = Depends(get_db),
 ):
     item_details = db_session.execute(
@@ -703,7 +699,7 @@ def get_item(
         "name": name,
         "quality": quality,
         "rarity": rarity,
-        "image": f"{request.base_url}{image_path}",
+        "image": image_path,
         "intent": intent,
         "quantity_threshold": quantity_threshold,
         "notify_sell": bool(notify_sell),
