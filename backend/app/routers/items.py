@@ -762,8 +762,6 @@ def update_item(
             transformed_data[key] = gold_and_silver_to_price(value)
         elif key == "intent":
             transformed_data[key] = value.value
-        elif key in ["notify_sell", "notify_buy"]:
-            transformed_data[key] = int(value)
         else:
             transformed_data[key] = value
 
