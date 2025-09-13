@@ -301,7 +301,7 @@ async function fetchItem(id: string | string[]) {
   loading.value = true
 
   try {
-    const response = await fetch(`http://127.0.0.1:8000/items/${id}`)
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/${id}`)
     if (!response.ok) {
       throw new Error(`Erro ao buscar item: ${response.statusText}`)
     }

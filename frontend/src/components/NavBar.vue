@@ -45,7 +45,7 @@ async function markAsReadAllBelow(id: number) {
 
 async function loadNotifications() {
   try {
-    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/notifications`)
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/notifications/`)
     if (!response.ok) {
       throw new Error('Network response was not ok')
     }
