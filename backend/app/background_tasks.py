@@ -36,10 +36,14 @@ async def notify_server(httpx_client: httpx.AsyncClient) -> None:
     if not webhook_secret:
         log("No webhook secret provided, skipping server notification.")
         return
+    base_url = os.getenv("SELF_BASE_URL")
+    if not base_url:
+        log("No base URL provided, skipping server notification.")
+        return
 
     try:
         response = await httpx_client.post(
-            "http://localhost:8000/internal/new-data",
+            f"{base_url}/internal/new-data",
             headers={"X-Internal-Secret": webhook_secret},
         )
         if response.status_code == 200:

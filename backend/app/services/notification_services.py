@@ -11,7 +11,6 @@ from ..websocket import connection_manager
 
 async def create_and_broadcast_notification(
     db_session: Session,
-    base_url: str,
     item: ItemForNotification,
     notification_type: NotificationType,
     current_price: int,
@@ -62,7 +61,7 @@ async def create_and_broadcast_notification(
             "item": {
                 "id": item.id,
                 "name": item.name,
-                "image": f"{base_url}{item.image_path}",
+                "image": item.image_path,
                 "quality": item.quality,
                 "rarity": item.rarity,
             },
@@ -74,7 +73,7 @@ async def create_and_broadcast_notification(
     await connection_manager.broadcast(message)
 
 
-async def notify_price_below(db_session: Session, base_url: str):
+async def notify_price_below(db_session: Session):
     items_to_notify = db_session.execute(
         text("""
         WITH latest_prices AS
@@ -113,7 +112,6 @@ async def notify_price_below(db_session: Session, base_url: str):
 
         await create_and_broadcast_notification(
             db_session,
-            base_url,
             ItemForNotification(
                 id=item_id,
                 name=name,
@@ -128,7 +126,7 @@ async def notify_price_below(db_session: Session, base_url: str):
         )
 
 
-async def notify_price_above(db_session: Session, base_url: str):
+async def notify_price_above(db_session: Session):
     items_to_notify = db_session.execute(
         text("""
        WITH latest_prices AS
@@ -167,7 +165,6 @@ async def notify_price_above(db_session: Session, base_url: str):
 
         await create_and_broadcast_notification(
             db_session,
-            base_url,
             ItemForNotification(
                 id=item_id,
                 name=name,
@@ -182,7 +179,7 @@ async def notify_price_above(db_session: Session, base_url: str):
         )
 
 
-async def notify_price_below_best_avg(db_session: Session, base_url: str):
+async def notify_price_below_best_avg(db_session: Session):
     items_to_notify = db_session.execute(
         text("""
         WITH latest_prices AS (
@@ -245,7 +242,6 @@ async def notify_price_below_best_avg(db_session: Session, base_url: str):
 
         await create_and_broadcast_notification(
             db_session,
-            base_url,
             ItemForNotification(
                 id=item_id,
                 name=name,
@@ -259,7 +255,7 @@ async def notify_price_below_best_avg(db_session: Session, base_url: str):
         )
 
 
-async def notify_price_above_best_avg(db_session: Session, base_url: str):
+async def notify_price_above_best_avg(db_session: Session):
     items_to_notify = db_session.execute(
         text("""
         WITH latest_prices AS (
@@ -322,7 +318,6 @@ async def notify_price_above_best_avg(db_session: Session, base_url: str):
 
         await create_and_broadcast_notification(
             db_session,
-            base_url,
             ItemForNotification(
                 id=item_id,
                 name=name,
@@ -336,7 +331,7 @@ async def notify_price_above_best_avg(db_session: Session, base_url: str):
         )
 
 
-async def notify_after_update(db_session: Session, base_url: str):
+async def notify_after_update(db_session: Session):
     await connection_manager.broadcast(
         {
             "action": "new_data",
@@ -345,7 +340,7 @@ async def notify_after_update(db_session: Session, base_url: str):
             },
         }
     )
-    await notify_price_below(db_session, base_url)
-    await notify_price_above(db_session, base_url)
-    await notify_price_below_best_avg(db_session, base_url)
-    await notify_price_above_best_avg(db_session, base_url)
+    await notify_price_below(db_session)
+    await notify_price_above(db_session)
+    await notify_price_below_best_avg(db_session)
+    await notify_price_above_best_avg(db_session)
