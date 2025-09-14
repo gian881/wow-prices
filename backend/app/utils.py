@@ -1,14 +1,12 @@
 import json
 import os
 from datetime import datetime
-from io import BytesIO
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup, Tag
-from PIL import Image
 from sqlalchemy import Row
 
 from app.blizzard_api import fetch_blizzard_api
