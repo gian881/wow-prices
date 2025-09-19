@@ -518,28 +518,6 @@ export const customBuyColorScale: [number, string][] = [
   [1.0, '#a50026'],
 ]
 
-export function getRelativeTime(dateString: string): string {
-  const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' })
-
-  const now = new Date()
-  const past = new Date(dateString)
-  const diffMs = past.getTime() - now.getTime()
-  const diffSec = Math.round(diffMs / 1000)
-  const diffMin = Math.round(diffSec / 60)
-  const diffHours = Math.round(diffMin / 60)
-  const diffDays = Math.round(diffHours / 24)
-
-  if (Math.abs(diffSec) < 60) {
-    return rtf.format(diffSec, 'second')
-  } else if (Math.abs(diffMin) < 60) {
-    return rtf.format(diffMin, 'minute')
-  } else if (Math.abs(diffHours) < 24) {
-    return rtf.format(diffHours, 'hour')
-  } else {
-    return rtf.format(diffDays, 'day')
-  }
-}
-
 export function getTodayWeekdayIndex(): number {
   const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
   const currentWeekday = new Date()

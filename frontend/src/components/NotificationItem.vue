@@ -3,7 +3,7 @@ import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
 import ItemImage from '@/components/ItemImage.vue'
 import type { Notification } from '@/types'
-import { getRelativeTime } from '@/utils'
+import { useTimeAgoIntl } from '@vueuse/core'
 import { computed, ref } from 'vue'
 import CheckIcon from './icons/CheckIcon.vue'
 import DownCheckIcon from './icons/DownCheckIcon.vue'
@@ -33,6 +33,9 @@ const title = computed(() => {
 })
 
 const markAsReadLoading = ref(false)
+const relativeTime = useTimeAgoIntl(new Date(props.notification.created_at), {
+  locale: 'pt-BR',
+})
 
 async function markAsRead() {
   markAsReadLoading.value = true
@@ -111,7 +114,7 @@ async function markAsRead() {
             <img :src="silverImage" alt="" class="h-3 w-3" />
           </div>
         </div>
-        <p class="text-light-yellow-200">{{ getRelativeTime(notification.created_at) }}</p>
+        <p class="text-light-yellow-200">{{ relativeTime }}</p>
       </div>
     </div>
     <div class="flex gap-2 flex-col">

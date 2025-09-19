@@ -8,7 +8,6 @@ import ItemImage from '@/components/ItemImage.vue'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -23,10 +22,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { state as websocketState } from '@/services/websocketService'
-import { customBuyColorScale, customSellColorScale, getRelativeTime } from '@/utils'
+import { customBuyColorScale, customSellColorScale } from '@/utils'
+import { useTimeAgoIntl } from '@vueuse/core'
 // @ts-expect-error we have no types for this package
 import Plotly from 'plotly.js-cartesian-dist-min'
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch, type ComputedRef } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -125,15 +125,14 @@ watch(
   { immediate: true },
 )
 
+let relativeTime: ComputedRef<string> | null = null
+
 watch(item, (newItem) => {
   if (newItem && newItem.average_price_data) {
     nextTick(async () => {
       Plotly.purge('priceChartDiv')
       Plotly.purge('quantityChartDiv')
       Plotly.purge('lastWeekChartDiv')
-
-      console.log(newItem.last_week_data)
-
       Plotly.newPlot(
         'lastWeekChartDiv',
         [
@@ -307,6 +306,9 @@ async function fetchItem(id: string | string[]) {
     }
     const jsonResponse = await response.json()
     item.value = jsonResponse
+    relativeTime = useTimeAgoIntl(new Date(jsonResponse.last_timestamp), {
+      locale: 'pt-BR',
+    })
     intentEditForm.value = jsonResponse.intent
     notifySellEditForm.value = jsonResponse.notify_sell
     notifyBuyEditForm.value = jsonResponse.notify_buy
@@ -484,9 +486,6 @@ async function saveSettings() {
           <form @submit.prevent="saveSettings">
             <DialogHeader class="flex flex-row items-center justify-between">
               <DialogTitle>Configurações</DialogTitle>
-              <DialogDescription class="sr-only">
-                Make changes to your profile here. Click save when you're done.
-              </DialogDescription>
               <div class="flex items-center gap-2">
                 <item-image
                   :image="item.image"
@@ -635,7 +634,7 @@ async function saveSettings() {
       </p>
       <p class="text-light-yellow-200 text-sm">
         Dados atualizados
-        <span class="font-semibold">{{ getRelativeTime(item.last_timestamp) }}</span>
+        <span class="font-semibold">{{ relativeTime }}</span>
       </p>
     </div>
   </div>
