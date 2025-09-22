@@ -21,8 +21,6 @@ export const websocketService = {
     }
 
     socket.onmessage = (event) => {
-      console.log('Mensagem recebida do WebSocket:', event.data)
-
       try {
         state.lastMessage = JSON.parse(event.data)
       } catch (error) {
