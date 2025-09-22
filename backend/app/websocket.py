@@ -27,8 +27,8 @@ async def websocket_endpoint(websocket: WebSocket):
     await connection_manager.connect(websocket)
     try:
         while True:
-            # Mantém a conexão aberta para receber mensagens, se necessário.
-            await websocket.receive_text()
+            message = await websocket.receive_text()
+            await websocket.send_text(f"Message received: {message}")
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
