@@ -21,10 +21,16 @@ export const websocketService = {
     }
 
     socket.onmessage = (event) => {
+      console.log('Mensagem recebida do WebSocket:', event.data)
+
       try {
         state.lastMessage = JSON.parse(event.data)
       } catch (error) {
-        console.error('Erro ao processar a mensagem do WebSocket:', error)
+        if (error instanceof SyntaxError) {
+          console.error('Erro de sintaxe ao analisar a mensagem JSON do WebSocket:', error)
+        } else {
+          console.error('Erro ao processar a mensagem do WebSocket:', error)
+        }
       }
     }
 
@@ -47,7 +53,7 @@ export const websocketService = {
     }
   },
 
-  sendMessage(message: object) {
+  sendJSONMessage(message: object) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(message))
     } else {

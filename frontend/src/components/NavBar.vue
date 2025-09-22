@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import wowLogo from '@/assets/wow-logo.png'
-import { state as websocketState } from '@/services/websocketService'
+import { websocketService, state as websocketState } from '@/services/websocketService'
 import type { Notification } from '@/types'
 import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
@@ -115,6 +115,19 @@ onMounted(() => {
           >
             Calculadora
           </router-link>
+        </li>
+        <li>
+          <button
+            @click="
+              () => {
+                websocketService.sendJSONMessage({
+                  message: 'Message from client',
+                })
+              }
+            "
+          >
+            Send message
+          </button>
         </li>
       </ul>
       <popover>
