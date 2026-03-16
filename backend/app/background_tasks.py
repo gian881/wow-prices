@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -109,8 +110,6 @@ def save_data(processed_data: pd.DataFrame, db_session: Session) -> None:
 async def run_periodic_data_fetch() -> None:
     log("Initializing.")
 
-    client = httpx.AsyncClient(timeout=30)
-
     FETCH_INTERVAL = timedelta(hours=1)
 
     sleep_duration = 0
@@ -127,9 +126,7 @@ async def run_periodic_data_fetch() -> None:
                     .limit(1)
                 ).one_or_none()
 
-                last_timestamp_utc = None
-                if res:
-                    last_timestamp_utc = res.replace(tzinfo=timezone.utc)
+                last_timestamp_utc = res.replace(tzinfo=timezone.utc) if res else None
 
                 now_utc = datetime.now(timezone.utc)
 
@@ -141,19 +138,25 @@ async def run_periodic_data_fetch() -> None:
 
                 # 1 hour or more has passed, or no data found, fetch new data
                 log("Fetching new data.")
-                data = await get_data(client)
-                now_utc = datetime.now(timezone.utc)
-                if data:
-                    sleep_duration = FETCH_INTERVAL.total_seconds()  # Sleep for 1 hour
-                    processed_data = await process_data(data, db_session, now_utc)
-                    if processed_data is not None:
-                        save_data(processed_data, db_session)
-                        await notify_server(client)
+                async with httpx.AsyncClient(timeout=30) as client:
+                    data = await get_data(client)
+                    now_utc = datetime.now(timezone.utc)
+                    if data:
+                        sleep_duration = (
+                            FETCH_INTERVAL.total_seconds()
+                        )  # Sleep for 1 hour
+                        processed_data = await process_data(data, db_session, now_utc)
+                        if processed_data is not None:
+                            save_data(processed_data, db_session)
+                            await notify_server(client)
+                        else:
+                            log("No processed data to save.")
                     else:
-                        log("No processed data to save.")
-                else:
-                    sleep_duration = 1 * 60  # Sleep for 1 minute
-                    log("No data fetched from the API.")
+                        sleep_duration = 1 * 60  # Sleep for 1 minute
+                        log("No data fetched from the API.")
+
+                del data
+                gc.collect()
         except Exception as e:
             log(f"An error occurred in the periodic task loop: {e}")
 
