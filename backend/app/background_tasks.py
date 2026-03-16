@@ -1,6 +1,7 @@
 import asyncio
 import gc
 import os
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -70,36 +71,35 @@ async def process_data(
     threshold_map = {int(item[0]): int(item[1]) for item in db_items}
     items_ids = set(threshold_map.keys())
 
-    logger.info("Filtering all the data for active items")
+    logger.info("Iterating over auctions in chunks and aggregating manually")
 
-    df = (
-        pd.json_normalize(json_result["auctions"])
-        .query("`item.id` in @items_ids")
-        .rename(columns={"item.id": "item_id", "unit_price": "price"})
-    )
+    price_quantity = defaultdict(lambda: defaultdict(int))
+    for chunk_start in range(0, len(json_result["auctions"]), 5000):
+        chunk = json_result["auctions"][chunk_start : chunk_start + 5000]
+        for auction in chunk:
+            item_id = auction["item"]["id"]
+            if item_id not in items_ids:
+                continue
+            price = auction["unit_price"]
+            price_quantity[item_id][price] += auction["quantity"]
 
-    df = df[["item_id", "quantity", "price"]]
+    filtered: list[dict[str, int]] = []
+    for item_id, prices in price_quantity.items():
+        threshold = threshold_map[item_id]
+        for price, qty in prices.items():
+            if qty >= threshold:
+                filtered.append({"item_id": item_id, "price": price, "quantity": qty})
 
-    logger.info('Grouping data by "item_id" and "price" and summing quantities.')
-
-    df = df.groupby(["item_id", "price"])["quantity"].sum().reset_index()
-
-    logger.info("Filtering by threshold quantity for each item.")
-
-    df = df[
-        df.apply(lambda row: row["quantity"] >= threshold_map[row["item_id"]], axis=1)
-    ]
-
-    if not df.empty:
+    if filtered:
+        df = pd.DataFrame(filtered)
         logger.info(
-            "Dataframe is not empty, proceeding with final grouping and timestamp addition."
+            "Chunk aggregated data ready, proceeding with final grouping and timestamp addition."
         )
         df = (
             df.groupby("item_id")
             .agg(price=("price", "min"), quantity=("quantity", "sum"))
             .reset_index()
         )
-
         df["timestamp"] = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
         logger.info("Returning the processed data")
