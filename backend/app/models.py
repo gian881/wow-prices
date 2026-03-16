@@ -58,3 +58,10 @@ class ItemCache(SQLModel, table=True):
     blizzard_image_url: str
     quality: Quality = Field(default=Quality.normal)
     rarity: Rarity = Field(default=Rarity.COMMON)
+
+
+class Settings(SQLModel, table=True):
+    __tablename__: str = "settings"  #  type: ignore
+
+    key: str = Field(primary_key=True)
+    value: str
