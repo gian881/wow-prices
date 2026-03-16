@@ -93,8 +93,8 @@ class ItemForNotification(BaseModel):
     id: int
     name: str
     image_path: str
-    quality: int
-    rarity: str
+    quality: Quality
+    rarity: Rarity
 
 
 class BuyingSellingData(BaseModel):
@@ -108,7 +108,7 @@ class ReturnItem(BaseModel):
     id: int
     name: str
     quality: Quality
-    rarity: str
+    rarity: Rarity
     image: str
     intent: Intent
     quantity_threshold: int
@@ -129,7 +129,7 @@ class SimpleItem(BaseModel):
     name: str
     price: PriceGoldSilver
     quality: Quality
-    rarity: str
+    rarity: Rarity
     image: str
 
 
