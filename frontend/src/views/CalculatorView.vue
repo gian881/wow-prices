@@ -1,35 +1,22 @@
 <script setup lang="ts">
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import ItemOnCalculator from '@/components/ItemOnCalculator.vue'
+import ItemOnCalculator from '@/components/item/ItemOnCalculator.vue'
+import { getItems } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
+import type { Item } from '@/types/item'
 import { computed, onMounted, ref, watch } from 'vue'
 
-export type Item = {
-  id: number
-  name: string
-  price: {
-    gold: number
-    silver: number
-  }
-  quality: number
-  image: string
-  rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
+export type CalculatorItem = Item & {
   quantity: number
 }
 
-const items = ref<Item[]>([])
+const items = ref<CalculatorItem[]>([])
 
 async function fetchItems() {
   try {
-    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items?intent=sell`)
-    if (!response.ok) {
-      throw new Error('Network response was not ok')
-    }
-    items.value = await response.json()
-    items.value.forEach((item) => {
-      item.quantity = 0
-    })
+    const returnedItems = await getItems({ intent: 'sell' })
+    items.value = returnedItems.map((item) => ({ ...item, quantity: 0 }))
   } catch (error) {
     console.error('Error fetching items:', error)
   }

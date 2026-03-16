@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import ItemImage from './ItemImage.vue'
-import BellIcon from './icons/BellIcon.vue'
+import BellIcon from '@/components/icons/BellIcon.vue'
+import ItemImage from '@/components/item/ItemImage.vue'
+import type { GoldAndSilver, Quality, Rarity } from '@/types'
 
 defineProps<{
   id: number
   name: string
-  price: {
-    gold: number
-    silver: number
-  }
-  quality: number
-  rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
+  price: GoldAndSilver
+  quality: Quality
+  rarity: Rarity
   image: string
   size?: 'sm' | 'md'
   isNotificationOn?: boolean

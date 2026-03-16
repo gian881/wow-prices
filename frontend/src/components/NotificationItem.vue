@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import ItemImage from '@/components/ItemImage.vue'
-import type { Notification } from '@/types'
+import CheckIcon from '@/components/icons/CheckIcon.vue'
+import DownCheckIcon from '@/components/icons/DownCheckIcon.vue'
+import ItemImage from '@/components/item/ItemImage.vue'
+import { markNotificationAsRead } from '@/services/api/endpoints/notification'
+import type { Notification } from '@/types/notifications'
 import { useTimeAgoIntl } from '@vueuse/core'
 import { computed, ref } from 'vue'
-import CheckIcon from './icons/CheckIcon.vue'
-import DownCheckIcon from './icons/DownCheckIcon.vue'
 
 const props = defineProps<{
   notification: Notification
@@ -40,17 +41,7 @@ const relativeTime = useTimeAgoIntl(new Date(props.notification.created_at), {
 async function markAsRead() {
   markAsReadLoading.value = true
   try {
-    const response = await fetch(
-      `${import.meta.env.VITE_BACKEND_BASE_URL}/notifications/${props.notification.id}/mark-read`,
-      {
-        method: 'POST',
-      },
-    )
-
-    if (!response.ok) {
-      throw new Error('Failed to mark notification as read')
-    }
-
+    await markNotificationAsRead(props.notification.id)
     emit('mark-as-read', props.notification.id)
   } catch (error) {
     console.error('Failed to mark notification as read:', error)

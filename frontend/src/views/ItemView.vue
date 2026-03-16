@@ -1,27 +1,11 @@
 <script setup lang="ts">
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
-import NotifyDownIcon from '@/components/icons/NotifyDownIcon.vue'
-import NotifyUpIcon from '@/components/icons/NotifyUpIcon.vue'
-import SettingsIcon from '@/components/icons/SettingsIcon.vue'
-import ItemImage from '@/components/ItemImage.vue'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import ItemImage from '@/components/item/ItemImage.vue'
+import ItemSettingsDialog from '@/components/item/ItemSettingsDialog.vue'
+import { getItem, getItemPlotData } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
+import type { DetailedItem, ItemPlotData } from '@/types/item'
 import { customBuyColorScale, customSellColorScale } from '@/utils'
 import { useTimeAgoIntl } from '@vueuse/core'
 // @ts-expect-error we have no types for this package
@@ -30,104 +14,26 @@ import { nextTick, ref, watch, type ComputedRef } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const item = ref<{
-  id: number
-  name: string
-  quality: number
-  rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
-  image: string
-  intent: 'sell' | 'buy' | 'both'
-  quantity_threshold: number
-  notify_sell: boolean
-  notify_buy: boolean
-  above_alert: {
-    gold: number
-    silver: number
-  }
-  below_alert: {
-    gold: number
-    silver: number
-  }
-  current_quantity: number
-  current_price: {
-    gold: number
-    silver: number
-  }
-  average_price_data: {
-    x: string[]
-    y: string[]
-    z: number[][]
-  }
-  average_quantity_data: {
-    x: string[]
-    y: string[]
-    z: number[][]
-  }
-  last_week_data: {
-    price: {
-      x: string[]
-      y: number[]
-    }
-    quantity: {
-      x: string[]
-      y: number[]
-    }
-  }
-  last_timestamp: string
-  selling: {
-    weekday: string
-    hour: number
-    price: {
-      gold: number
-      silver: number
-    }
-    price_diff: {
-      sign: string
-      gold: number
-      silver: number
-    }
-  } | null
-  buying: {
-    weekday: string
-    hour: number
-    price: {
-      gold: number
-      silver: number
-    }
-    price_diff: {
-      sign: string
-      gold: number
-      silver: number
-    }
-  } | null
-} | null>()
+const item = ref<DetailedItem | null>()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-const intentEditForm = ref<'sell' | 'buy' | 'both'>('sell')
-const notifySellEditForm = ref(false)
-const notifyBuyEditForm = ref(false)
-const quantityThresholdEditForm = ref(100)
-const aboveAlertEditForm = ref({
-  gold: 0,
-  silver: 0,
-})
-const belowAlertEditForm = ref({
-  gold: 0,
-  silver: 0,
-})
 const isSettingsDialogOpen = ref(false)
+const itemPlotData = ref<ItemPlotData>()
 
 watch(
   () => route.params.id,
-  (id) => fetchItem(id),
+  (id) => {
+    fetchItem(id)
+    fetchItemPlotData(id)
+  },
   { immediate: true },
 )
 
 let relativeTime: ComputedRef<string> | null = null
 
-watch(item, (newItem) => {
+watch(itemPlotData, (newItem) => {
   if (newItem && newItem.average_price_data) {
     nextTick(async () => {
       Plotly.purge('priceChartDiv')
@@ -295,29 +201,28 @@ watch(
   { deep: true },
 )
 
+async function fetchItemPlotData(id: string | string[]) {
+  try {
+    itemPlotData.value = await getItemPlotData(id)
+  } catch (err) {
+    console.error('Erro ao buscar dados para os gráficos:', err)
+  }
+}
+
 async function fetchItem(id: string | string[]) {
   error.value = item.value = null
   loading.value = true
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/${id}`)
-    if (!response.ok) {
-      throw new Error(`Erro ao buscar item: ${response.statusText}`)
-    }
-    const jsonResponse = await response.json()
-    item.value = jsonResponse
-    relativeTime = useTimeAgoIntl(new Date(jsonResponse.last_timestamp), {
+    const responseData = await getItem(id)
+    item.value = responseData
+    relativeTime = useTimeAgoIntl(new Date(responseData.last_timestamp), {
       locale: 'pt-BR',
     })
-    intentEditForm.value = jsonResponse.intent
-    notifySellEditForm.value = jsonResponse.notify_sell
-    notifyBuyEditForm.value = jsonResponse.notify_buy
-    quantityThresholdEditForm.value = jsonResponse.quantity_threshold
-    aboveAlertEditForm.value = jsonResponse.above_alert
-    belowAlertEditForm.value = jsonResponse.below_alert
 
-    const qualityString = jsonResponse.quality === 0 ? '' : ` - ${jsonResponse.quality}`
-    document.title = `${jsonResponse.name}${qualityString} - WOW Prices`
+    const qualityString =
+      responseData.quality === 'normal' ? '' : ` - ${responseData.quality.replace(/\D/g, '')}`
+    document.title = `${responseData.name}${qualityString} - WOW Prices`
   } catch (err) {
     if (err instanceof Error) {
       error.value = err.message
@@ -330,63 +235,12 @@ async function fetchItem(id: string | string[]) {
 }
 
 function closeDialog() {
-  if (item.value) {
-    intentEditForm.value = item.value.intent
-    notifySellEditForm.value = item.value.notify_sell
-    notifyBuyEditForm.value = item.value.notify_buy
-    quantityThresholdEditForm.value = item.value.quantity_threshold
-    aboveAlertEditForm.value.gold = item.value.above_alert.gold
-    aboveAlertEditForm.value.silver = item.value.above_alert.silver
-    belowAlertEditForm.value.gold = item.value.below_alert.gold
-    belowAlertEditForm.value.silver = item.value.below_alert.silver
-  }
   isSettingsDialogOpen.value = false
 }
 
 async function saveSettings() {
-  if (!item.value) return
-
-  if (intentEditForm.value === 'sell') {
-    notifyBuyEditForm.value = false
-  }
-  if (intentEditForm.value === 'buy') {
-    notifySellEditForm.value = false
-  }
-
-  const updatedItem = {
-    intent: intentEditForm.value,
-    notify_sell: notifySellEditForm.value,
-    notify_buy: notifyBuyEditForm.value,
-    quantity_threshold: quantityThresholdEditForm.value,
-    above_alert: aboveAlertEditForm.value,
-    below_alert: belowAlertEditForm.value,
-  }
-
-  try {
-    const response = await fetch(
-      `${import.meta.env.VITE_BACKEND_BASE_URL}/items/${item.value.id}`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedItem),
-      },
-    )
-
-    if (!response.ok) {
-      throw new Error(`Erro ao salvar configurações: ${response.statusText}`)
-    }
-
-    isSettingsDialogOpen.value = false
-    fetchItem(route.params.id)
-  } catch (err) {
-    if (err instanceof Error) {
-      error.value = err.message
-    } else {
-      error.value = String(err)
-    }
-  }
+  isSettingsDialogOpen.value = false
+  await fetchItem(route.params.id)
 }
 </script>
 
@@ -470,163 +324,15 @@ async function saveSettings() {
       </div>
     </div>
     <div class="flex flex-col items-end justify-between gap-1 text-right">
-      <Dialog v-model:open="isSettingsDialogOpen">
-        <DialogTrigger as-child>
-          <button
-            class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow rounded-md p-2.5 transition-colors"
-            @click="isSettingsDialogOpen = true"
-          >
-            <settings-icon />
-          </button>
-        </DialogTrigger>
-        <DialogContent
-          class="text-light-yellow bg-midnight-light-200 px-6 py-4 md:max-w-[540px]"
-          as-child
-        >
-          <form @submit.prevent="saveSettings">
-            <DialogHeader class="flex flex-row items-center justify-between">
-              <DialogTitle>Configurações</DialogTitle>
-              <div class="flex items-center gap-2">
-                <item-image
-                  :image="item.image"
-                  :name="item.name"
-                  :quality="item.quality"
-                  :rarity="item.rarity"
-                  size="xxs"
-                />
-                <p>{{ item.name }}</p>
-              </div>
-            </DialogHeader>
-            <div class="flex flex-col gap-1">
-              <label class="font-title text-lg leading-[1.2] font-bold" for="intent"
-                >Intenção</label
-              >
-              <Select id="intent" placeholder="Intenção" name="intent" v-model="intentEditForm">
-                <select-trigger
-                  class="text-light-yellow w-full border-none bg-white/10 text-sm focus:border"
-                >
-                  <select-value placeholder="Selecione a intenção" />
-                </select-trigger>
-                <select-content class="bg-[#323134]">
-                  <select-group>
-                    <select-item value="sell">Vender</select-item>
-                    <select-item value="buy">Comprar</select-item>
-                    <select-item value="both">Ambos</select-item>
-                  </select-group>
-                </select-content>
-              </Select>
-            </div>
-            <div class="flex gap-2 text-sm leading-none">
-              <button
-                v-if="intentEditForm === 'sell' || intentEditForm === 'both'"
-                class="flex flex-1 items-center gap-2 rounded-md bg-white/10 p-1 inset-ring-2 transition-all hover:bg-white/12 active:bg-white/15"
-                :class="{
-                  'inset-ring-accent': notifySellEditForm,
-                  'hover:inset-ring-accent/50 inset-ring-transparent': !notifySellEditForm,
-                }"
-                @click="notifySellEditForm = !notifySellEditForm"
-                type="button"
-              >
-                <notify-up-icon />Notificar acima da média
-              </button>
-              <button
-                v-if="intentEditForm === 'buy' || intentEditForm === 'both'"
-                class="flex flex-1 items-center gap-2 rounded-md bg-white/10 p-1 inset-ring-2 transition-all hover:bg-white/12 active:bg-white/15"
-                :class="{
-                  'inset-ring-accent': notifyBuyEditForm,
-                  'hover:inset-ring-accent/50 inset-ring-transparent': !notifyBuyEditForm,
-                }"
-                @click="notifyBuyEditForm = !notifyBuyEditForm"
-                type="button"
-              >
-                <notify-down-icon />Notificar abaixo da média
-              </button>
-            </div>
-            <div class="flex flex-col gap-1">
-              <label class="font-title text-lg leading-[1.2] font-bold" for="quantityThreshold"
-                >Quantidade mínima</label
-              ><input
-                type="number"
-                id="quantityThreshold"
-                v-model="quantityThresholdEditForm"
-                class="focus:ring-accent text-light-yellow placeholder:text-light-yellow/75 hover:ring-accent/50 rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
-              />
-            </div>
-            <div class="flex items-center gap-4">
-              <div class="flex flex-col gap-1">
-                <label class="font-title text-lg leading-[1.2] font-bold" for="aboveAlertGold"
-                  >Alerta acima de</label
-                >
-                <div class="flex gap-2">
-                  <div class="flex items-center justify-start gap-1">
-                    <input
-                      type="number"
-                      id="aboveAlertGold"
-                      v-model="aboveAlertEditForm.gold"
-                      class="hover:ring-accent/50 focus:ring-accent text-light-yellow placeholder:text-light-yellow/75 max-w-[87px] rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
-                      placeholder="000"
-                    />
-                    <img :src="goldImage" class="h-6 w-6" />
-                  </div>
-                  <div class="flex items-center gap-1">
-                    <input
-                      type="number"
-                      id="aboveAlertSilver"
-                      v-model="aboveAlertEditForm.silver"
-                      class="hover:ring-accent/50 focus:ring-accent text-light-yellow placeholder:text-light-yellow/75 max-w-[87px] rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
-                      placeholder="00"
-                    />
-                    <img :src="silverImage" class="h-6 w-6" />
-                  </div>
-                </div>
-              </div>
-              <div class="flex flex-col gap-1">
-                <label class="font-title text-lg leading-[1.2] font-bold" for="belowAlertGold"
-                  >Alerta abaixo de</label
-                >
-                <div class="flex items-center gap-2">
-                  <div class="flex items-center gap-1">
-                    <input
-                      type="number"
-                      id="belowAlertGold"
-                      v-model="belowAlertEditForm.gold"
-                      class="focus:ring-accent text-light-yellow placeholder:text-light-yellow/75 hover:ring-accent/50 max-w-[87px] rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
-                      placeholder="000"
-                    />
-                    <img :src="goldImage" class="h-6 w-6" />
-                  </div>
-                  <div class="flex items-center gap-1">
-                    <input
-                      type="number"
-                      id="belowAlertSilver"
-                      v-model="belowAlertEditForm.silver"
-                      class="focus:ring-accent text-light-yellow placeholder:text-light-yellow/75 hover:ring-accent/50 max-w-[87px] rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
-                      placeholder="00"
-                    />
-                    <img :src="silverImage" class="h-6 w-6" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter class="text-light-yellow flex gap-8">
-              <button
-                type="button"
-                class="border-accent flex-1 rounded-md border bg-white/5 p-1.5 transition-colors hover:bg-white/12 active:bg-white/20"
-                @click="closeDialog()"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow flex-1 rounded-md p-1.5 transition-colors"
-              >
-                Salvar
-              </button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <div class="flex gap-2 items-center">
+        <p v-if="!item.is_active" class="text-red-600 font-semibold">Item desativado</p>
+        <item-settings-dialog
+          @close="closeDialog"
+          @save-settings="saveSettings"
+          v-model:open="isSettingsDialogOpen"
+          :item="item"
+        />
+      </div>
 
       <p class="text-lg">
         Quantidade:

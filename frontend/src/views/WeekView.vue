@@ -1,28 +1,12 @@
 <script setup lang="ts">
-import ItemOnHome from '@/components/ItemOnHome.vue'
+import ItemOnHome from '@/components/item/ItemOnHome.vue'
+import { getWeekItems } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
+import type { WeekItem } from '@/types/item'
 import { getTodayWeekdayIndex } from '@/utils'
 import { onMounted, ref, watch } from 'vue'
 
-const items = ref<
-  {
-    weekday: string
-    hours: {
-      hour: number
-      items: {
-        id: number
-        name: string
-        price: {
-          gold: number
-          silver: number
-        }
-        quality: number
-        rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ARTIFACT' | 'TOKEN'
-        image: string
-      }[]
-    }[]
-  }[]
->([])
+const items = ref<WeekItem[]>([])
 
 const daysOfWeek = [
   { normalizedName: 'domingo', displayName: 'Domingo' },
@@ -35,12 +19,7 @@ const daysOfWeek = [
 ]
 
 async function fetchWeekItems() {
-  const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/week`)
-  if (!response.ok) {
-    throw new Error(`Erro ao buscar itens: ${response.statusText}`)
-  }
-  const data = await response.json()
-  items.value = data
+  items.value = await getWeekItems()
 }
 
 watch(

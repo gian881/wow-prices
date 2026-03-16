@@ -1,4 +1,5 @@
 import type { Item } from '@/types'
+import { editItem } from './services/api/endpoints/item'
 
 export const customSellColorScale: [number, string][] = [
   [0.0, '#a50026'],
@@ -557,17 +558,7 @@ export async function toggleNotification(item: Item) {
   }
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/${item.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`Erro ao atualizar notificação: ${response.statusText}`)
-    }
+    await editItem(item.id, payload)
 
     Object.assign(item, payload)
   } catch (error) {
