@@ -2,14 +2,16 @@ import httpx
 from sqlmodel import Session, select
 
 from app.dependencies import engine
+from app.logger import get_logger
 from app.models import Item, ItemCache
 from app.utils import (
     BUCKET_NAME,
     download_image_and_upload_to_supabase,
     get_item_blizzard_image_url,
-    log,
     supabase_client,
 )
+
+logger = get_logger(__name__)
 
 
 async def verify_images_on_startup():
@@ -17,14 +19,16 @@ async def verify_images_on_startup():
     Checks if all images in the 'items' table exist in Supabase Storage.
     If an image is missing, it re-downloads and uploads it.
     """
-    log("Starting image verification task...")
+    logger.info("Starting image verification task...")
 
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             with Session(engine) as session:
                 items = session.exec(select(Item.id, Item.image_path)).all()
                 if not items:
-                    log("No items found in the database. Skipping image verification.")
+                    logger.info(
+                        "No items found in the database. Skipping image verification."
+                    )
                     return
 
                 storage_files_list = supabase_client.storage.from_(BUCKET_NAME).list()
@@ -40,8 +44,8 @@ async def verify_images_on_startup():
 
                     if file_name not in existing_storage_files:
                         missing_count += 1
-                        log(
-                            f"❗️ Image '{file_name}' for item ID {item_id} is missing. Attempting to re-upload..."
+                        logger.warning(
+                            f"Image '{file_name}' for item ID {item_id} is missing. Attempting to re-upload..."
                         )
 
                         # Verifies if we have a cached Blizzard URL for this item
@@ -57,8 +61,8 @@ async def verify_images_on_startup():
                                 client, item_id
                             )
                             if not blizzard_url:
-                                log(
-                                    f"   - ❌ Could not find Blizzard URL in cache or API for item ID {item_id}."
+                                logger.error(
+                                    f"Could not find Blizzard URL in cache or API for item ID {item_id}."
                                 )
                                 continue
                         else:
@@ -69,9 +73,13 @@ async def verify_images_on_startup():
                                 client, blizzard_url, file_name
                             )
                         except Exception as e:
-                            log(f"   - ❌ Failed to re-upload '{file_name}': {e}")
+                            logger.error(
+                                f"Failed to re-upload '{file_name}': {e}", exc_info=True
+                            )
         except Exception as e:
-            log(f"An error occurred during image verification: {e}")
+            logger.error(
+                f"An error occurred during image verification: {e}", exc_info=True
+            )
 
 
 if __name__ == "__main__":

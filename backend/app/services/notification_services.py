@@ -2,11 +2,14 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, text
 
+from app.logger import get_logger
 from app.models import Notification, NotificationType
 from app.schemas import ItemForNotification
 from app.utils import price_to_gold_and_silver
 
 from ..websocket import connection_manager
+
+logger = get_logger(__name__)
 
 
 async def create_and_broadcast_notification(
@@ -35,7 +38,7 @@ async def create_and_broadcast_notification(
     notification_id = notification.id
 
     if notification_id is None:
-        print("Erro ao obter o ID da notificação inserida.")
+        logger.error("Erro ao obter o ID da notificação inserida.")
         return
 
     price_diff_obj = price_to_gold_and_silver(price_diff)
@@ -75,7 +78,8 @@ async def create_and_broadcast_notification(
 
 async def notify_price_below(db_session: Session):
     items_to_notify = db_session.execute(
-        text("""
+        text(
+            """
         WITH latest_prices AS
         (SELECT item_id,
                 price,
@@ -97,7 +101,8 @@ async def notify_price_below(db_session: Session):
         AND i.below_alert > 0
         AND i.is_active = TRUE
         ORDER BY lp.price DESC
-    """)
+    """
+        )
     ).fetchall()
 
     for item in items_to_notify:
@@ -129,7 +134,8 @@ async def notify_price_below(db_session: Session):
 
 async def notify_price_above(db_session: Session):
     items_to_notify = db_session.execute(
-        text("""
+        text(
+            """
        WITH latest_prices AS
         (SELECT item_id,
                 price,
@@ -151,7 +157,8 @@ async def notify_price_above(db_session: Session):
         AND i.above_alert > 0
         AND i.is_active = TRUE
         ORDER BY lp.price DESC
-    """)
+    """
+        )
     ).fetchall()
 
     for item in items_to_notify:
@@ -183,7 +190,8 @@ async def notify_price_above(db_session: Session):
 
 async def notify_price_below_best_avg(db_session: Session):
     items_to_notify = db_session.execute(
-        text("""
+        text(
+            """
         WITH latest_prices AS (
             SELECT
                 item_id,
@@ -229,7 +237,8 @@ async def notify_price_below_best_avg(db_session: Session):
             AND i.is_active = TRUE
             AND lp.rn = 1
             AND lp.price < lap.min_avg_price;
-    """)
+    """
+        )
     ).fetchall()
 
     for item in items_to_notify:
@@ -260,7 +269,8 @@ async def notify_price_below_best_avg(db_session: Session):
 
 async def notify_price_above_best_avg(db_session: Session):
     items_to_notify = db_session.execute(
-        text("""
+        text(
+            """
         WITH latest_prices AS (
             SELECT
                 item_id,
@@ -283,7 +293,7 @@ async def notify_price_above_best_avg(db_session: Session):
                     GROUP BY
                         item_id,
                         EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
-                        EXTRACT(HOUR FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer
+                        EXTRACT(HOUR FROM "timestamp\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::integer
                 ) AS daily_averages
             GROUP BY
                 item_id
@@ -306,7 +316,8 @@ async def notify_price_above_best_avg(db_session: Session):
             AND i.is_active = TRUE
             AND lp.rn = 1
             AND lp.price > lap.max_avg_price;
-    """)
+    """
+        )
     ).fetchall()
 
     for item in items_to_notify:

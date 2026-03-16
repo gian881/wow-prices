@@ -1,5 +1,9 @@
 from fastapi import APIRouter, WebSocket
 
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ConnectionManager:
     def __init__(self):
@@ -29,6 +33,6 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
     finally:
         connection_manager.disconnect(websocket)
