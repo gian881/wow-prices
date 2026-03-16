@@ -2,7 +2,7 @@ import datetime
 
 from sqlmodel import Field, SQLModel
 
-from app.schemas import Intent, NotificationType, Rarity
+from app.schemas import Intent, NotificationType, Quality, Rarity
 
 
 class Item(SQLModel, table=True):
@@ -11,7 +11,7 @@ class Item(SQLModel, table=True):
     id: int = Field(primary_key=True)
     name: str
     image_path: str
-    quality: int = Field(default=0)
+    quality: Quality = Field(default=Quality.normal)
     rarity: Rarity = Field(default=Rarity.COMMON)
     quantity_threshold: int = Field(default=100)
     intent: Intent = Field(default=Intent.sell)
@@ -19,6 +19,7 @@ class Item(SQLModel, table=True):
     below_alert: int = Field(default=0)
     notify_sell: bool = Field(default=False)
     notify_buy: bool = Field(default=False)
+    is_active: bool = Field(default=True)
 
 
 class Notification(SQLModel, table=True):
@@ -55,5 +56,5 @@ class ItemCache(SQLModel, table=True):
     item_id: int = Field(primary_key=True)
     name: str
     blizzard_image_url: str
-    quality: int = Field(default=0)
+    quality: Quality = Field(default=Quality.normal)
     rarity: Rarity = Field(default=Rarity.COMMON)

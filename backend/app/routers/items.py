@@ -15,11 +15,14 @@ from app.blizzard_api import fetch_blizzard_api
 from app.dependencies import get_db, get_http_client
 from app.models import Item, ItemCache
 from app.schemas import (
+    BuyingSellingData,
     CreateItemOptions,
     EditItem,
     Intent,
+    PriceDiff,
     PriceGoldSilver,
     ReturnItem,
+    Sign,
     TodayItem,
     TodayResponse,
     WeekResponse,
@@ -90,6 +93,7 @@ def get_week_items(db_session: Session = Depends(get_db)):
         WHERE
             rp.rn = 1
             AND i.intent IN ('sell', 'both')
+            AND i.is_active = TRUE
         ORDER BY
             rp.weekday_num,
             rp.hour;
@@ -183,6 +187,7 @@ def get_today_items(db_session: Session = Depends(get_db)):
             rp.rn = 1
             AND rp.weekday_num = :today_weekday
             AND i.intent IN ('sell', 'both')
+            AND i.is_active = TRUE
         ORDER BY
             rp.hour;
 
@@ -218,6 +223,7 @@ def get_items(
     order_by: str = "id",
     order: str = "desc",
     intent: Intent | None = None,
+    show_inactive: bool = False,
 ):
     order_by_map = {
         "id": "i.id",
@@ -227,13 +233,16 @@ def get_items(
         "rarity": "i.rarity",
     }
 
-    intent_clause = ""
+    where_clause = ""
     if intent == Intent.sell:
-        intent_clause = "AND (i.intent = 'sell')"
+        where_clause = "AND (i.intent = 'sell')"
     elif intent == Intent.buy:
-        intent_clause = "AND (i.intent = 'buy')"
+        where_clause = "AND (i.intent = 'buy')"
     elif intent == Intent.both:
-        intent_clause = "AND (i.intent IN ('sell', 'buy'))"
+        where_clause = "AND (i.intent IN ('sell', 'buy'))"
+
+    if not show_inactive:
+        where_clause += " AND i.is_active = TRUE"
 
     order_clause = f"{order_by_map.get(order_by, 'i.id')} {order.upper() if order.lower() in ['asc', 'desc'] else 'DESC'}"
 
@@ -259,16 +268,15 @@ def get_items(
                     i.notify_sell,
                     i.notify_buy,
                     i.rarity,
-                    lp.price,
-                    lp.quantity,
-                    to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
+                    i.is_active,
+                    lp.price
                 FROM
                     items AS i
                 JOIN
                     latest_prices AS lp ON i.id = lp.item_id
                 WHERE
                     lp.rn = 1
-                    {intent_clause}
+                    {where_clause}
                 ORDER BY
                     {order_clause};
         """,
@@ -280,8 +288,8 @@ def get_items(
             "id": item[0],
             "name": item[1],
             "price": {
-                "gold": int(item[8] / 10000),
-                "silver": int((item[8] / 10000 - int(item[8] / 10000)) * 100),
+                "gold": int(item[9] / 10000),
+                "silver": int((item[9] / 10000 - int(item[9] / 10000)) * 100),
             },
             "quality": item[3],
             "image": item[2],
@@ -289,6 +297,7 @@ def get_items(
             "intent": item[4],
             "notify_sell": bool(item[5]),
             "notify_buy": bool(item[6]),
+            "is_active": bool(item[8]),
         }
         for item in result
     ]
@@ -359,7 +368,9 @@ async def add_item(
             )
 
         if not uploaded_image_url:
-            uploaded_image_url = img_url  # Fallback para a URL original se o upload falhar 3 vezes
+            uploaded_image_url = (
+                img_url  # Fallback para a URL original se o upload falhar 3 vezes
+            )
 
         item = Item(
             id=item_id,
@@ -460,59 +471,8 @@ async def get_item_blizzard(
         )
 
 
-@router.get("/{item_id}", response_model=ReturnItem)
-def get_item(
-    item_id: int,
-    db_session: Session = Depends(get_db),
-):
-    item_details = db_session.execute(
-        text("""
-            SELECT
-                i.name,
-                i.image_path,
-                i.quality,
-                i.rarity,
-                i.intent,
-                i.quantity_threshold,
-                i.above_alert,
-                i.below_alert,
-                i.notify_sell,
-                i.notify_buy,
-                ph.price,
-                ph.quantity,
-                to_char(ph."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
-            FROM
-                items AS i
-            JOIN
-                price_history AS ph ON i.id = ph.item_id
-            WHERE
-                i.id = :item_id
-            ORDER BY
-                ph."timestamp" DESC
-            LIMIT 1;
-        """),
-        {"item_id": item_id},
-    ).fetchone()
-
-    if not item_details:
-        raise HTTPException(status_code=404, detail="Item não encontrado")
-
-    (
-        name,
-        image_path,
-        quality,
-        rarity,
-        intent,
-        quantity_threshold,
-        above_alert,
-        below_alert,
-        notify_sell,
-        notify_buy,
-        price,
-        quantity,
-        timestamp,
-    ) = item_details
-
+@router.get("/{item_id}/plot-data")
+def get_item_plot_data(item_id: int, db_session: Session = Depends(get_db)):
     price_heatmap_raw_data = db_session.execute(
         text("""
                 SELECT
@@ -535,9 +495,7 @@ def get_item(
         {"item_id": item_id},
     ).all()
 
-    plotly_price_heatmap_data = get_plotly_heatmap_data(
-        price_heatmap_raw_data, "price"
-    )
+    plotly_price_heatmap_data = get_plotly_heatmap_data(price_heatmap_raw_data, "price")
 
     quantity_heatmap_raw_data = db_session.execute(
         text(
@@ -573,6 +531,106 @@ def get_item(
     plotly_quantity_heatmap_data = get_plotly_heatmap_data(
         quantity_heatmap_raw_data, "quantity"
     )
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_week_start = (now - datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    last_week_data = db_session.execute(
+        text("""
+            SELECT
+                to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS'),
+                price / 10000.0,
+                quantity
+            FROM
+                price_history
+            WHERE
+                item_id = :item_id AND "timestamp" >= :last_week_start
+            ORDER BY
+                "timestamp" DESC
+            LIMIT :limit;
+        """),
+        {
+            "item_id": item_id,
+            "last_week_start": last_week_start,
+            "limit": 7 * 24,
+        },
+    ).fetchall()
+
+    line_chart_price_data = {
+        "x": [data[0] for data in last_week_data],
+        "y": [float(data[1]) for data in last_week_data],
+    }
+
+    line_chart_quantity_data = {
+        "x": [data[0] for data in last_week_data],
+        "y": [data[2] for data in last_week_data],
+    }
+
+    return {
+        "item_id": item_id,
+        "average_price_data": plotly_price_heatmap_data,
+        "average_quantity_data": plotly_quantity_heatmap_data,
+        "last_week_data": {
+            "price": line_chart_price_data,
+            "quantity": line_chart_quantity_data,
+        },
+    }
+
+
+@router.get("/{item_id}", response_model=ReturnItem)
+def get_item(
+    item_id: int,
+    db_session: Session = Depends(get_db),
+):
+    item_details = db_session.execute(
+        text("""
+            SELECT
+                i.name,
+                i.image_path,
+                i.quality,
+                i.rarity,
+                i.intent,
+                i.quantity_threshold,
+                i.above_alert,
+                i.below_alert,
+                i.notify_sell,
+                i.notify_buy,
+                i.is_active,
+                ph.price,
+                ph.quantity,
+                to_char(ph."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS')
+            FROM
+                items AS i
+            JOIN
+                price_history AS ph ON i.id = ph.item_id
+            WHERE
+                i.id = :item_id
+            ORDER BY
+                ph."timestamp" DESC
+            LIMIT 1;
+        """),
+        {"item_id": item_id},
+    ).fetchone()
+
+    if not item_details:
+        raise HTTPException(status_code=404, detail="Item não encontrado")
+
+    (
+        name,
+        image_path,
+        quality,
+        rarity,
+        intent,
+        quantity_threshold,
+        above_alert,
+        below_alert,
+        notify_sell,
+        notify_buy,
+        is_active,
+        price,
+        quantity,
+        timestamp,
+    ) = item_details
 
     selling_weekday = buying_weekday = ""
     selling_hour = buying_hour = selling_diff = buying_diff = 0
@@ -658,88 +716,47 @@ def get_item(
     above_obj = price_to_gold_and_silver(above_alert)
     below_obj = price_to_gold_and_silver(below_alert)
 
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_week_start = (now - datetime.timedelta(days=7)).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-
-    last_week_data = db_session.execute(
-        text("""
-            SELECT
-                to_char("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI:SS'),
-                price / 10000.0,
-                quantity
-            FROM
-                price_history
-            WHERE
-                item_id = :item_id AND "timestamp" >= :last_week_start
-            ORDER BY
-                "timestamp" DESC
-            LIMIT :limit;
-        """),
-        {
-            "item_id": item_id,
-            "last_week_start": last_week_start,
-            "limit": 7 * 24,
-        },
-    ).fetchall()
-
-    line_chart_price_data = {
-        "x": [data[0] for data in last_week_data],
-        "y": [float(data[1]) for data in last_week_data],
-    }
-
-    line_chart_quantity_data = {
-        "x": [data[0] for data in last_week_data],
-        "y": [data[2] for data in last_week_data],
-    }
-
-    return {
-        "id": item_id,
-        "name": name,
-        "quality": quality,
-        "rarity": rarity,
-        "image": image_path,
-        "intent": intent,
-        "quantity_threshold": quantity_threshold,
-        "notify_sell": bool(notify_sell),
-        "notify_buy": bool(notify_buy),
-        "above_alert": above_obj,
-        "below_alert": below_obj,
-        "current_quantity": quantity,
-        "current_price": price_obj,
-        "average_price_data": plotly_price_heatmap_data,
-        "average_quantity_data": plotly_quantity_heatmap_data,
-        "last_week_data": {
-            "price": line_chart_price_data,
-            "quantity": line_chart_quantity_data,
-        },
-        "last_timestamp": timestamp,
-        "selling": {
-            "weekday": selling_weekday,
-            "hour": selling_hour,
-            "price": selling_best_avg_obj,
-            "price_diff": {
-                "sign": "positive" if selling_diff >= 0 else "negative",
-                "gold": abs(selling_diff_obj.gold),
-                "silver": abs(selling_diff_obj.silver),
-            },
-        }
+    return ReturnItem(
+        id=item_id,
+        name=name,
+        quality=quality,
+        rarity=rarity,
+        image=image_path,
+        intent=Intent(intent),
+        quantity_threshold=quantity_threshold,
+        notify_sell=bool(notify_sell),
+        notify_buy=bool(notify_buy),
+        above_alert=above_obj,
+        below_alert=below_obj,
+        current_quantity=quantity,
+        current_price=price_obj,
+        last_timestamp=timestamp,
+        selling=BuyingSellingData(
+            weekday=selling_weekday,
+            hour=selling_hour,
+            price=selling_best_avg_obj,
+            price_diff=PriceDiff(
+                sign=Sign.POSITIVE if selling_diff >= 0 else Sign.NEGATIVE,
+                gold=abs(selling_diff_obj.gold),
+                silver=abs(selling_diff_obj.silver),
+            ),
+        )
         if intent == "sell" or intent == "both"
         else None,
-        "buying": {
-            "weekday": buying_weekday,
-            "hour": buying_hour,
-            "price": buying_best_avg_obj,
-            "price_diff": {
-                "sign": "positive" if buying_diff >= 0 else "negative",
-                "gold": abs(buying_diff_obj.gold),
-                "silver": abs(buying_diff_obj.silver),
-            },
-        }
+        buying=BuyingSellingData(
+            weekday=buying_weekday,
+            hour=buying_hour,
+            price=buying_best_avg_obj,
+            price_diff=PriceDiff(
+                sign=Sign.POSITIVE if buying_diff >= 0 else Sign.NEGATIVE,
+                gold=abs(buying_diff_obj.gold),
+                silver=abs(buying_diff_obj.silver),
+            ),
+        )
         if intent == "buy" or intent == "both"
         else None,
-    }
+        is_active=bool(is_active),
+    )
 
 
 @router.put("/{item_id}")
@@ -748,25 +765,21 @@ def update_item(
     item_updates: EditItem,
     db_session: Session = Depends(get_db),
 ):
-    result = db_session.execute(
-        select(Item.id).where(Item.id == item_id)
-    ).first()
+    result = db_session.exec(select(Item.id).where(Item.id == item_id)).first()
 
     if result is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")
     update_data = item_updates.model_dump(exclude_unset=True)
 
     if not update_data:
-        raise HTTPException(
-            status_code=400, detail="Nenhum dado para atualizar"
-        )
+        raise HTTPException(status_code=400, detail="Nenhum dado para atualizar")
 
     transformed_data = {}
 
     for key, value in update_data.items():
         if key in ["above_alert", "below_alert"]:
             transformed_data[key] = gold_and_silver_to_price(value)
-        elif key == "intent":
+        elif key == "intent" or key == "quality":
             transformed_data[key] = value.value
         else:
             transformed_data[key] = value
@@ -781,4 +794,5 @@ def update_item(
     db_session.execute(sql, {"item_id": item_id, **transformed_data})
     db_session.commit()
 
-    return {"message": "Item atualizado com sucesso"}
+    result = db_session.exec(select(Item).where(Item.id == item_id)).first()
+    return result

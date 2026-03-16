@@ -7,7 +7,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from sqlmodel import Session, and_, desc, select, text
+from sqlmodel import Session, and_, col, desc, func, select, text
 
 from app.dependencies import get_db
 from app.models import Item, Notification
@@ -35,17 +35,11 @@ async def mark_notifications_as_read(
             "unknown_notifications": [],
         }
     try:
-        placeholders = ",".join(
-            [f":id{i}" for i in range(len(notification_ids))]
-        )
-        params = {
-            f"id{i}": notification_ids[i] for i in range(len(notification_ids))
-        }
+        placeholders = ",".join([f":id{i}" for i in range(len(notification_ids))])
+        params = {f"id{i}": notification_ids[i] for i in range(len(notification_ids))}
 
         db_session.execute(
-            text(
-                f"UPDATE notifications SET read = TRUE WHERE id IN ({placeholders})"
-            ),
+            text(f"UPDATE notifications SET read = TRUE WHERE id IN ({placeholders})"),
             params,
         )
 
@@ -87,9 +81,7 @@ async def mark_notification_as_read(
     ).first()
 
     if not existing_notification:
-        raise HTTPException(
-            status_code=404, detail="Notificação não encontrada"
-        )
+        raise HTTPException(status_code=404, detail="Notificação não encontrada")
     if existing_notification.read:
         return {"message": "Notificação já está marcada como lida"}
 
@@ -102,40 +94,65 @@ async def mark_notification_as_read(
 
 @router.get("/")
 async def get_latest_notifications(
+    limit: int = 10,
+    page: int = 1,
+    ignore_read: bool = False,
     db_session: Session = Depends(get_db),
 ):
-    results = db_session.exec(
-        select(Notification, Item)
-        .where(
-            and_(Notification.read == False, Notification.item_id == Item.id)  # noqa: E712
-        )
-        .order_by(desc(Notification.created_at))
-    ).fetchall()
+    page = max(page, 1)
+    limit = max(limit, 10)
 
-    return [
-        {
-            "id": notification.id,
-            "type": notification.type,
-            "price_diff": price_to_gold_and_silver(notification.price_diff),
-            "current_price": price_to_gold_and_silver(
-                notification.current_price
-            ),
-            "price_threshold": (
-                None
-                if notification.price_threshold is None
-                else price_to_gold_and_silver(notification.price_threshold)
-            ),
-            "item": {
-                "id": item.id,
-                "name": item.name,
-                "image": item.image_path,
-                "quality": item.quality,
-                "rarity": item.rarity,
-            },
-            "read": notification.read,
-            "created_at": notification.created_at.replace(
-                tzinfo=datetime.timezone.utc
-            ).isoformat(),
-        }
-        for notification, item in results
-    ]
+    if ignore_read:
+        notifications = db_session.exec(
+            select(Notification, Item)
+            .where(and_(not Notification.read, Notification.item_id == Item.id))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .order_by(desc(Notification.created_at))
+        ).fetchall()
+        total = db_session.exec(
+            select(func.count(col(Notification.id))).where(not Notification.read)
+        ).one()
+    else:
+        notifications = db_session.exec(
+            select(Notification, Item)
+            .where(Notification.item_id == Item.id)
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .order_by(desc(Notification.created_at))
+        ).fetchall()
+        total = db_session.exec(select(func.count(col(Notification.id)))).one()
+
+    return {
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "max_page": (total + limit - 1) // limit,
+        },
+        "data": [
+            {
+                "id": notification.id,
+                "type": notification.type,
+                "price_diff": price_to_gold_and_silver(notification.price_diff),
+                "current_price": price_to_gold_and_silver(notification.current_price),
+                "price_threshold": (
+                    None
+                    if notification.price_threshold is None
+                    else price_to_gold_and_silver(notification.price_threshold)
+                ),
+                "item": {
+                    "id": item.id,
+                    "name": item.name,
+                    "image": item.image_path,
+                    "quality": item.quality,
+                    "rarity": item.rarity,
+                },
+                "read": notification.read,
+                "created_at": notification.created_at.replace(
+                    tzinfo=datetime.timezone.utc
+                ).isoformat(),
+            }
+            for notification, item in notifications
+        ],
+    }

@@ -1,43 +1,35 @@
 <script setup lang="ts">
 import wowLogo from '@/assets/wow-logo.png'
+import BellIcon from '@/components/icons/BellIcon.vue'
+import NotificationItem from '@/components/NotificationItem.vue'
+import Popover from '@/components/ui/popover/Popover.vue'
+import PopoverContent from '@/components/ui/popover/PopoverContent.vue'
+import PopoverTrigger from '@/components/ui/popover/PopoverTrigger.vue'
+import { getNotifications, markNotificationsAsRead } from '@/services/api/endpoints/notification'
 import { state as websocketState } from '@/services/websocketService'
-import type { Notification } from '@/types'
+import type { Notification } from '@/types/notifications'
+import { isAxiosError } from 'axios'
 import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import BellIcon from './icons/BellIcon.vue'
-import NotificationItem from './NotificationItem.vue'
-import Popover from './ui/popover/Popover.vue'
-import PopoverContent from './ui/popover/PopoverContent.vue'
-import PopoverTrigger from './ui/popover/PopoverTrigger.vue'
 
 const notifications = ref<Notification[]>([])
+const unreadNotificationsCount = ref(0)
 
 async function markAsReadAllBelow(id: number) {
   const index = notifications.value.findIndex((n) => n.id === id)
   if (index !== -1) {
     const idsToMarkAsRead = notifications.value.slice(index).map((n) => n.id)
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_BACKEND_BASE_URL}/notifications/mark-read`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(idsToMarkAsRead),
-        },
-      )
-
-      if (!response.ok) {
-        if (response.status === 500) {
-          const errorData = await response.json()
-          throw new Error(errorData.message)
-        }
-        throw new Error()
-      }
-
+      await markNotificationsAsRead(idsToMarkAsRead)
       notifications.value = notifications.value.filter((n) => !idsToMarkAsRead.includes(n.id))
     } catch (error) {
+      if (isAxiosError(error)) {
+        console.error(
+          'Failed to mark notifications as read:',
+          error.response?.data || error.message,
+        )
+        return
+      }
       console.error('Failed to mark notifications as read:', error)
     }
   }
@@ -45,11 +37,10 @@ async function markAsReadAllBelow(id: number) {
 
 async function loadNotifications() {
   try {
-    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/notifications/`)
-    if (!response.ok) {
-      throw new Error('Network response was not ok')
-    }
-    notifications.value = await response.json()
+    const { data: returnedNotifications } = await getNotifications()
+
+    notifications.value = returnedNotifications
+    unreadNotificationsCount.value = returnedNotifications.filter((n) => !n.read).length
   } catch (error) {
     console.error('Failed to load notifications:', error)
   }
@@ -65,6 +56,7 @@ watch(
       newMessage.action === 'new_notification'
     ) {
       notifications.value.unshift(newMessage.data as Notification)
+      unreadNotificationsCount.value = notifications.value.filter((n) => !n.read).length
     }
   },
   { deep: true },
@@ -120,19 +112,19 @@ onMounted(() => {
       <popover>
         <popover-trigger as="button" class="relative">
           <bell-icon
-            :has-notifications="notifications.length > 0"
+            :has-notifications="unreadNotificationsCount > 0"
             class="text-light-yellow"
             aria-label="Notifications"
             filled
           />
           <span
-            v-if="notifications.length > 0"
+            v-if="unreadNotificationsCount > 0"
             class="absolute min-w-4 rounded-full bg-[#B10000] p-0.5 text-center font-mono text-xs leading-none font-bold"
             :class="{
-              'top-1 right-[3px]': notifications.length < 10,
-              'top-1 right-px': notifications.length >= 10,
+              'top-1 right-[3px]': unreadNotificationsCount < 10,
+              'top-1 right-px': unreadNotificationsCount >= 10,
             }"
-            >{{ notifications.length }}
+            >{{ unreadNotificationsCount }}
           </span>
         </popover-trigger>
         <popover-content

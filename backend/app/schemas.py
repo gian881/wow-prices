@@ -3,6 +3,17 @@ from enum import Enum
 from pydantic import BaseModel
 
 
+class Quality(Enum):
+    normal = "normal"
+    tier_1 = "tier_1"
+    tier_2 = "tier_2"
+    tier_3 = "tier_3"
+    tier_4 = "tier_4"
+    tier_5 = "tier_5"
+    tier_1_midnight = "tier_1_midnight"
+    tier_2_midnight = "tier_2_midnight"
+
+
 class Intent(Enum):
     sell = "sell"
     buy = "buy"
@@ -74,6 +85,8 @@ class EditItem(BaseModel):
     below_alert: PriceGoldSilver | None = None
     notify_sell: bool | None = None
     notify_buy: bool | None = None
+    quality: Quality | None = None
+    is_active: bool | None = None
 
 
 class ItemForNotification(BaseModel):
@@ -94,7 +107,7 @@ class BuyingSellingData(BaseModel):
 class ReturnItem(BaseModel):
     id: int
     name: str
-    quality: int
+    quality: Quality
     rarity: str
     image: str
     intent: Intent
@@ -105,19 +118,17 @@ class ReturnItem(BaseModel):
     below_alert: PriceGoldSilver
     current_quantity: int
     current_price: PriceGoldSilver
-    average_price_data: dict
-    average_quantity_data: dict
-    last_week_data: dict
     last_timestamp: str
     selling: BuyingSellingData | None
     buying: BuyingSellingData | None
+    is_active: bool
 
 
 class SimpleItem(BaseModel):
     id: int
     name: str
     price: PriceGoldSilver
-    quality: int
+    quality: Quality
     rarity: str
     image: str
 

@@ -24,24 +24,19 @@ async def verify_images_on_startup():
             with Session(engine) as session:
                 items = session.exec(select(Item.id, Item.image_path)).all()
                 if not items:
+                    log("No items found in the database. Skipping image verification.")
                     return
 
-                storage_files_list = supabase_client.storage.from_(
-                    BUCKET_NAME
-                ).list()
+                storage_files_list = supabase_client.storage.from_(BUCKET_NAME).list()
 
-                existing_storage_files = {
-                    file["name"] for file in storage_files_list
-                }
+                existing_storage_files = {file["name"] for file in storage_files_list}
 
                 missing_count = 0
                 for item_id, image_path in items:
                     if not image_path:
                         continue
 
-                    file_name = image_path.split("/")[-1][
-                        :-1
-                    ]  # Removing the "?"
+                    file_name = image_path.split("/")[-1][:-1]  # Removing the "?"
 
                     if file_name not in existing_storage_files:
                         missing_count += 1
@@ -74,9 +69,7 @@ async def verify_images_on_startup():
                                 client, blizzard_url, file_name
                             )
                         except Exception as e:
-                            log(
-                                f"   - ❌ Failed to re-upload '{file_name}': {e}"
-                            )
+                            log(f"   - ❌ Failed to re-upload '{file_name}': {e}")
         except Exception as e:
             log(f"An error occurred during image verification: {e}")
 

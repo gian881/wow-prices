@@ -1,16 +1,12 @@
 <script setup lang="ts">
-import ItemOnHome from '@/components/ItemOnHome.vue'
+import ItemOnHome from '@/components/item/ItemOnHome.vue'
+import { getTodayItems } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
-import type { Item } from '@/types'
+import type { TodayItem } from '@/types/item'
 import { isNotificationOn, toggleNotification } from '@/utils'
 import { onMounted, ref, watch } from 'vue'
 
-const hoursAndItems = ref<
-  {
-    hour: string
-    items: Item[]
-  }[]
->([])
+const hoursAndItems = ref<TodayItem[]>([])
 
 const isTodayItemsLoading = ref(false)
 const todayItemsError = ref<string | null>(null)
@@ -20,12 +16,7 @@ async function fetchTodayItems() {
   todayItemsError.value = null
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_BACKEND_BASE_URL}/items/today`)
-
-    if (!response.ok) {
-      throw new Error(`Erro ao buscar itens: ${response.statusText}`)
-    }
-    hoursAndItems.value = await response.json()
+    hoursAndItems.value = await getTodayItems()
   } catch (err) {
     if (err instanceof Error) {
       todayItemsError.value = err.message

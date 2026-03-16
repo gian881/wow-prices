@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import NavBar from '@/components/NavBar.vue'
 import { websocketService } from '@/services/websocketService'
 import { onMounted, onUnmounted } from 'vue'
 import { RouterView } from 'vue-router'
-import NavBar from './components/NavBar.vue'
 
 onMounted(() => {
   websocketService.connect()
