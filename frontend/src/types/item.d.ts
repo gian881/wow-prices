@@ -18,7 +18,7 @@ export type Item = BaseItem
 export type TodayItem = {
   hour: string
   items: Item[]
-}[]
+}
 
 export type WeekItem = {
   weekday: string
