@@ -1,4 +1,4 @@
-import type { Item } from '@/types'
+import type { Item } from '@/types/item'
 import { editItem } from './services/api/endpoints/item'
 
 export const customSellColorScale: [number, string][] = [
