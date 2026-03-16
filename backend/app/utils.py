@@ -1,8 +1,6 @@
 import json
 import os
-from datetime import datetime
 from typing import Any, Sequence
-from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
@@ -10,9 +8,12 @@ from bs4 import BeautifulSoup, Tag
 from sqlalchemy import Row
 
 from app.blizzard_api import fetch_blizzard_api
+from app.logger import get_logger
 from app.schemas import PriceGoldSilver, Quality
 from exceptions import EnvNotSetError
 from supabase import Client, create_client
+
+logger = get_logger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 if not SUPABASE_URL:
@@ -23,11 +24,6 @@ if not SUPABASE_KEY:
 
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "images"
-
-
-def log(message: str) -> None:
-    now = datetime.now(ZoneInfo("America/Sao_Paulo"))
-    print(f"{now.strftime('[%d/%m/%Y] [%H:%M:%S]')} {message}")
 
 
 def price_to_gold_and_silver(price: int | float) -> PriceGoldSilver:
@@ -60,13 +56,14 @@ async def download_image_and_upload_to_supabase(
         )
         return public_url
     except httpx.HTTPStatusError as e:
-        print(f"Failed to download image: {e}")
+        logger.error(f"Failed to download image: {e}")
         return None
     except Exception as e:
         if "duplicate" in str(e).lower():
-            print("Image already exists in Supabase, getting public URL.")
+            logger.info("Image already exists in Supabase, getting public URL.")
             return supabase_client.storage.from_(BUCKET_NAME).get_public_url(file_name)
         else:
+            logger.error(f"Unexpected error downloading image: {e}", exc_info=True)
             raise e
 
 
@@ -139,5 +136,7 @@ async def get_item_blizzard_image_url(
         )
         return img_response["assets"][0]["value"]
     except Exception as e:
-        print(f"Failed to get Blizzard image URL for item {item_id}: {e}")
+        logger.error(
+            f"Failed to get Blizzard image URL for item {item_id}: {e}", exc_info=True
+        )
         return None

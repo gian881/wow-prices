@@ -10,12 +10,14 @@ from sqlmodel import Session, desc, select
 
 from app.blizzard_api import fetch_blizzard_api
 from app.dependencies import engine
+from app.logger import get_logger
 from app.models import Item, PriceHistory
-from app.utils import log
+
+logger = get_logger(__name__)
 
 
 async def get_data(httpx_client: httpx.AsyncClient):
-    log("Getting new data.")
+    logger.info("Getting new data.")
 
     try:
         data = await fetch_blizzard_api(
@@ -26,20 +28,19 @@ async def get_data(httpx_client: httpx.AsyncClient):
 
         return data
     except HTTPException as e:
-        print("Erro ao carregar dados da blizzard")
-        print(e)
+        logger.error(f"Erro ao carregar dados da blizzard: {e}", exc_info=True)
 
 
 async def notify_server(httpx_client: httpx.AsyncClient) -> None:
-    log("Notifying the server about new data.")
+    logger.info("Notifying the server about new data.")
 
     webhook_secret = os.getenv("INTERNAL_WEBHOOK_SECRET")
     if not webhook_secret:
-        log("No webhook secret provided, skipping server notification.")
+        logger.warning("No webhook secret provided, skipping server notification.")
         return
     base_url = os.getenv("SELF_BASE_URL")
     if not base_url:
-        log("No base URL provided, skipping server notification.")
+        logger.warning("No base URL provided, skipping server notification.")
         return
 
     try:
@@ -48,17 +49,17 @@ async def notify_server(httpx_client: httpx.AsyncClient) -> None:
             headers={"X-Internal-Secret": webhook_secret},
         )
         if response.status_code == 200:
-            log("Server notified successfully.")
+            logger.info("Server notified successfully.")
 
         response.raise_for_status()
     except Exception as e:
-        log(f"Failed to notify server: {e}")
+        logger.error(f"Failed to notify server: {e}", exc_info=True)
 
 
 async def process_data(
     json_result, db_session: Session, current_timestamp: datetime
 ) -> pd.DataFrame | None:
-    log("Processing the new data")
+    logger.info("Processing the new data")
     db_items = db_session.exec(
         select(Item.id, Item.quantity_threshold).where(Item.is_active)
     ).all()
@@ -90,12 +91,12 @@ async def process_data(
         df["timestamp"] = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         return df
     else:
-        log("No data was persisted after processing.")
+        logger.info("No data was persisted after processing.")
         return None
 
 
 def save_data(processed_data: pd.DataFrame, db_session: Session) -> None:
-    log("Saving the new data to the DB")
+    logger.info("Saving the new data to the DB")
 
     processed_data.to_sql(
         "price_history",
@@ -108,7 +109,7 @@ def save_data(processed_data: pd.DataFrame, db_session: Session) -> None:
 
 
 async def run_periodic_data_fetch() -> None:
-    log("Initializing.")
+    logger.info("Initializing periodic data fetch.")
 
     FETCH_INTERVAL = timedelta(hours=1)
 
@@ -137,7 +138,7 @@ async def run_periodic_data_fetch() -> None:
                         continue
 
                 # 1 hour or more has passed, or no data found, fetch new data
-                log("Fetching new data.")
+                logger.info("Fetching new data.")
                 async with httpx.AsyncClient(timeout=30) as client:
                     data = await get_data(client)
                     now_utc = datetime.now(timezone.utc)
@@ -150,19 +151,21 @@ async def run_periodic_data_fetch() -> None:
                             save_data(processed_data, db_session)
                             await notify_server(client)
                         else:
-                            log("No processed data to save.")
+                            logger.info("No processed data to save.")
                     else:
                         sleep_duration = 1 * 60  # Sleep for 1 minute
-                        log("No data fetched from the API.")
+                        logger.warning("No data fetched from the API.")
 
                 del data
                 gc.collect()
         except Exception as e:
-            log(f"An error occurred in the periodic task loop: {e}")
+            logger.error(
+                f"An error occurred in the periodic task loop: {e}", exc_info=True
+            )
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_periodic_data_fetch())
     except ValueError as e:
-        log(f"Error occurred: {e}")
+        logger.error(f"Error occurred: {e}", exc_info=True)
