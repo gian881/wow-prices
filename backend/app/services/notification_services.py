@@ -95,6 +95,7 @@ async def notify_price_below(db_session: Session):
         WHERE lp.rn = 1
         AND lp.price < i.below_alert
         AND i.below_alert > 0
+        AND i.is_active = TRUE
         ORDER BY lp.price DESC
     """)
     ).fetchall()
@@ -148,6 +149,7 @@ async def notify_price_above(db_session: Session):
         WHERE lp.rn = 1
         AND lp.price > i.above_alert
         AND i.above_alert > 0
+        AND i.is_active = TRUE
         ORDER BY lp.price DESC
     """)
     ).fetchall()
@@ -224,6 +226,7 @@ async def notify_price_below_best_avg(db_session: Session):
         WHERE
             (i.intent = 'buy' OR i.intent = 'both')
             AND i.notify_buy = TRUE
+            AND i.is_active = TRUE
             AND lp.rn = 1
             AND lp.price < lap.min_avg_price;
     """)
@@ -300,6 +303,7 @@ async def notify_price_above_best_avg(db_session: Session):
         WHERE
             (i.intent = 'sell' OR i.intent = 'both')
             AND i.notify_sell = TRUE
+            AND i.is_active = TRUE
             AND lp.rn = 1
             AND lp.price > lap.max_avg_price;
     """)

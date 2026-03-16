@@ -58,7 +58,9 @@ async def process_data(
     json_result, db_session: Session, current_timestamp: datetime
 ) -> pd.DataFrame | None:
     log("Processing the new data")
-    db_items = db_session.exec(select(Item.id, Item.quantity_threshold)).all()
+    db_items = db_session.exec(
+        select(Item.id, Item.quantity_threshold).where(Item.is_active)
+    ).all()
 
     threshold_map = {int(item[0]): int(item[1]) for item in db_items}
     items_ids = set(threshold_map.keys())
@@ -74,9 +76,7 @@ async def process_data(
     df = df.groupby(["item_id", "price"])["quantity"].sum().reset_index()
 
     df = df[
-        df.apply(
-            lambda row: row["quantity"] >= threshold_map[row["item_id"]], axis=1
-        )
+        df.apply(lambda row: row["quantity"] >= threshold_map[row["item_id"]], axis=1)
     ]
 
     if not df.empty:
@@ -144,12 +144,8 @@ async def run_periodic_data_fetch() -> None:
                 data = await get_data(client)
                 now_utc = datetime.now(timezone.utc)
                 if data:
-                    sleep_duration = (
-                        FETCH_INTERVAL.total_seconds()
-                    )  # Sleep for 1 hour
-                    processed_data = await process_data(
-                        data, db_session, now_utc
-                    )
+                    sleep_duration = FETCH_INTERVAL.total_seconds()  # Sleep for 1 hour
+                    processed_data = await process_data(data, db_session, now_utc)
                     if processed_data is not None:
                         save_data(processed_data, db_session)
                         await notify_server(client)

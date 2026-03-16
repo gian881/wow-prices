@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup, Tag
 from sqlalchemy import Row
 
 from app.blizzard_api import fetch_blizzard_api
-from app.schemas import PriceGoldSilver
+from app.schemas import PriceGoldSilver, Quality
 from exceptions import EnvNotSetError
 from supabase import Client, create_client
 
@@ -42,14 +42,8 @@ def gold_and_silver_to_price(
 ) -> int:
     """Converte ouro e prata para preço em centavos."""
     if isinstance(price_gold_and_silver, PriceGoldSilver):
-        return (
-            price_gold_and_silver.gold * 10000
-            + price_gold_and_silver.silver * 100
-        )
-    return (
-        price_gold_and_silver["gold"] * 10000
-        + price_gold_and_silver["silver"] * 100
-    )
+        return price_gold_and_silver.gold * 10000 + price_gold_and_silver.silver * 100
+    return price_gold_and_silver["gold"] * 10000 + price_gold_and_silver["silver"] * 100
 
 
 async def download_image_and_upload_to_supabase(
@@ -71,19 +65,13 @@ async def download_image_and_upload_to_supabase(
     except Exception as e:
         if "duplicate" in str(e).lower():
             print("Image already exists in Supabase, getting public URL.")
-            return supabase_client.storage.from_(BUCKET_NAME).get_public_url(
-                file_name
-            )
+            return supabase_client.storage.from_(BUCKET_NAME).get_public_url(file_name)
         else:
             raise e
 
 
-async def get_item_quality(
-    item_id: int, httpx_client: httpx.AsyncClient
-) -> int:
-    response = await httpx_client.get(
-        f"https://www.wowhead.com/item={item_id}/"
-    )
+async def get_item_quality(item_id: int, httpx_client: httpx.AsyncClient) -> Quality:
+    response = await httpx_client.get(f"https://www.wowhead.com/item={item_id}/")
     if response.status_code == 301:
         response = await httpx_client.get(
             f"https://www.wowhead.com{response.headers['location']}"
@@ -94,12 +82,12 @@ async def get_item_quality(
         script_text = script.next_sibling.string
         if script_text:
             if "tier3.png" in script_text:
-                return 3
+                return Quality.tier_1
             if "tier2.png" in script_text:
-                return 2
+                return Quality.tier_2
             if "tier1.png" in script_text:
-                return 1
-    return 0
+                return Quality.tier_3
+    return Quality.normal
 
 
 def get_plotly_heatmap_data(
@@ -119,9 +107,7 @@ def get_plotly_heatmap_data(
         "Sábado",
     ]
 
-    heatmap_df = pd.DataFrame(
-        raw_data, columns=["weekday", "hour", column_name]
-    )
+    heatmap_df = pd.DataFrame(raw_data, columns=["weekday", "hour", column_name])
 
     heatmap_df["weekday"] = pd.Categorical(
         heatmap_df["weekday"], categories=weekday_order, ordered=True
