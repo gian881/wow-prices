@@ -20,6 +20,7 @@ async def get_data(httpx_client: httpx.AsyncClient):
     logger.info("Getting new data.")
 
     try:
+        logger.info("Fetching data from Blizzard API.")
         data = await fetch_blizzard_api(
             "https://us.api.blizzard.com/data/wow/auctions/commodities",
             httpx_client,
@@ -64,8 +65,12 @@ async def process_data(
         select(Item.id, Item.quantity_threshold).where(Item.is_active)
     ).all()
 
+    logger.info(f"Found {len(db_items)} active items in the database for processing.")
+
     threshold_map = {int(item[0]): int(item[1]) for item in db_items}
     items_ids = set(threshold_map.keys())
+
+    logger.info("Filtering all the data for active items")
 
     df = (
         pd.json_normalize(json_result["auctions"])
@@ -75,13 +80,20 @@ async def process_data(
 
     df = df[["item_id", "quantity", "price"]]
 
+    logger.info('Grouping data by "item_id" and "price" and summing quantities.')
+
     df = df.groupby(["item_id", "price"])["quantity"].sum().reset_index()
+
+    logger.info("Filtering by threshold quantity for each item.")
 
     df = df[
         df.apply(lambda row: row["quantity"] >= threshold_map[row["item_id"]], axis=1)
     ]
 
     if not df.empty:
+        logger.info(
+            "Dataframe is not empty, proceeding with final grouping and timestamp addition."
+        )
         df = (
             df.groupby("item_id")
             .agg(price=("price", "min"), quantity=("quantity", "sum"))
@@ -89,6 +101,8 @@ async def process_data(
         )
 
         df["timestamp"] = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+        logger.info("Returning the processed data")
         return df
     else:
         logger.info("No data was persisted after processing.")
@@ -104,6 +118,8 @@ def save_data(processed_data: pd.DataFrame, db_session: Session) -> None:
         if_exists="append",
         index=False,
     )
+
+    logger.info("Data saved to the database, committing the transaction.")
 
     db_session.commit()
 
