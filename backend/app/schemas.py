@@ -152,3 +152,8 @@ class TodayItem(SimpleItem):
 class TodayResponse(BaseModel):
     hour: str
     items: list[TodayItem]
+
+
+class UpdateSettings(BaseModel):
+    key: str
+    value: str

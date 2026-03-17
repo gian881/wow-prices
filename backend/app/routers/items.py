@@ -28,6 +28,7 @@ from app.schemas import (
     WeekResponse,
 )
 from app.utils import (
+    best_price_window_start_date,
     download_image_and_upload_to_supabase,
     get_item_quality,
     get_plotly_heatmap_data,
@@ -43,6 +44,8 @@ router = APIRouter(
 
 @router.get("/week", response_model=list[WeekResponse])
 def get_week_items(db_session: Session = Depends(get_db)):
+    window_start = best_price_window_start_date(db_session)
+
     results = db_session.execute(
         text("""
         WITH AggregatedHistory AS (
@@ -53,6 +56,8 @@ def get_week_items(db_session: Session = Depends(get_db)):
                 AVG(price) AS avg_price
             FROM
                 price_history
+            WHERE
+                (:window_start IS NULL OR "timestamp" >= :window_start)
             GROUP BY
                 item_id,
                 weekday_num,
@@ -97,7 +102,8 @@ def get_week_items(db_session: Session = Depends(get_db)):
         ORDER BY
             rp.weekday_num,
             rp.hour;
-        """)
+        """),
+        {"window_start": window_start},
     )
 
     return [
@@ -133,6 +139,9 @@ def get_today_items(db_session: Session = Depends(get_db)):
     today_weekday = (
         datetime.datetime.now().weekday() + 1
     ) % 7  # Deixando weekday igual ao do SQL
+
+    window_start = best_price_window_start_date(db_session)
+
     results = db_session.execute(
         text("""
         WITH AggregatedHistory AS (
@@ -143,6 +152,8 @@ def get_today_items(db_session: Session = Depends(get_db)):
                 AVG(price) AS avg_price
             FROM
                 price_history
+            WHERE
+                (:window_start IS NULL OR "timestamp" >= :window_start)
             GROUP BY
                 item_id,
                 weekday_num,
@@ -192,7 +203,7 @@ def get_today_items(db_session: Session = Depends(get_db)):
             rp.hour;
 
     """),
-        {"today_weekday": today_weekday},
+        {"today_weekday": today_weekday, "window_start": window_start},
     )
 
     return [
@@ -639,6 +650,8 @@ def get_item(
     selling_diff_obj = PriceGoldSilver(gold=0, silver=0)
     buying_diff_obj = PriceGoldSilver(gold=0, silver=0)
 
+    window_start = best_price_window_start_date(db_session)
+
     if intent == "sell" or intent == "both":
         selling_data = db_session.execute(
             text(
@@ -659,6 +672,7 @@ def get_item(
                         price_history
                     WHERE
                         item_id = :item_id
+                        AND (:window_start IS NULL OR "timestamp" >= :window_start)
                     GROUP BY
                         weekday,
                         hour
@@ -667,7 +681,7 @@ def get_item(
                     LIMIT 1;
             """,
             ),
-            {"item_id": item_id},
+            {"item_id": item_id, "window_start": window_start},
         ).fetchone()
         if not selling_data:
             selling_data = ("", 0, 0)
@@ -696,6 +710,7 @@ def get_item(
                     price_history
                 WHERE
                     item_id = :item_id
+                    AND (:window_start IS NULL OR "timestamp" >= :window_start)
                 GROUP BY
                     weekday,
                     hour
@@ -703,7 +718,7 @@ def get_item(
                     best_avg_price ASC
                 LIMIT 1;
                  """),
-            {"item_id": item_id},
+            {"item_id": item_id, "window_start": window_start},
         ).fetchone()
         if not buying_data:
             buying_data = ("", 0, 0)

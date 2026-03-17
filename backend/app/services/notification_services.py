@@ -5,7 +5,7 @@ from sqlmodel import Session, text
 from app.logger import get_logger
 from app.models import Notification, NotificationType
 from app.schemas import ItemForNotification
-from app.utils import price_to_gold_and_silver
+from app.utils import best_price_window_start_date, price_to_gold_and_silver
 
 from ..websocket import connection_manager
 
@@ -189,6 +189,8 @@ async def notify_price_above(db_session: Session):
 
 
 async def notify_price_below_best_avg(db_session: Session):
+    window_start = best_price_window_start_date(db_session)
+
     items_to_notify = db_session.execute(
         text(
             """
@@ -211,6 +213,8 @@ async def notify_price_below_best_avg(db_session: Session):
                         AVG(price) as avg_price
                     FROM
                         price_history
+                    WHERE
+                        (:window_start IS NULL OR "timestamp" >= :window_start)
                     GROUP BY
                         item_id,
                         EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
@@ -238,7 +242,8 @@ async def notify_price_below_best_avg(db_session: Session):
             AND lp.rn = 1
             AND lp.price < lap.min_avg_price;
     """
-        )
+        ),
+        {"window_start": window_start},
     ).fetchall()
 
     for item in items_to_notify:
@@ -268,6 +273,8 @@ async def notify_price_below_best_avg(db_session: Session):
 
 
 async def notify_price_above_best_avg(db_session: Session):
+    window_start = best_price_window_start_date(db_session)
+
     items_to_notify = db_session.execute(
         text(
             """
@@ -290,6 +297,8 @@ async def notify_price_above_best_avg(db_session: Session):
                         AVG(price) as avg_price
                     FROM
                         price_history
+                    WHERE
+                        (:window_start IS NULL OR "timestamp" >= :window_start)
                     GROUP BY
                         item_id,
                         EXTRACT(DOW FROM "timestamp" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'),
@@ -317,7 +326,8 @@ async def notify_price_above_best_avg(db_session: Session):
             AND lp.rn = 1
             AND lp.price > lap.max_avg_price;
     """
-        )
+        ),
+        {"window_start": window_start},
     ).fetchall()
 
     for item in items_to_notify:
