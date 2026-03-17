@@ -33,6 +33,12 @@ app.include_router(notifications.router)
 app.include_router(internal.router)
 app.include_router(websocket.router)
 
+
+@app.get("/health", tags=["Health Check"])
+def health_check():
+    return {"status": "ok"}
+
+
 origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
 app.add_middleware(
