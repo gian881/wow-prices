@@ -153,11 +153,11 @@ onMounted(() => {
 <template>
   <main>
     <div>
-      <div class="flex justify-between items-center">
+      <div class="flex items-center justify-between">
         <h2 class="font-title text-3xl font-bold">Todos os itens</h2>
         <div class="flex gap-2">
           <button
-            class="text-center rounded-md bg-white/10 px-3 py-1 inset-ring-2 transition-all hover:bg-white/12 active:bg-white/15"
+            class="rounded-md bg-white/10 px-3 py-1 text-center inset-ring-2 transition-all hover:bg-white/12 active:bg-white/15"
             :class="{
               'inset-ring-accent': showInactive,
               'hover:inset-ring-accent/50 inset-ring-transparent': !showInactive,
@@ -188,14 +188,14 @@ onMounted(() => {
 
                 <div class="flex flex-col gap-1">
                   <label for="id" class="font-title text-lg leading-[1.2] font-bold">Id</label>
-                  <div class="flex items-center gap-2 justify-between">
+                  <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center gap-2">
                       <input
                         type="text"
                         id="id"
                         v-model="id"
                         placeholder="Digite o id do item"
-                        class="max-w-[144px] focus:ring-accent text-light-yellow placeholder:text-light-yellow/50 hover:ring-accent/50 rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
+                        class="focus:ring-accent text-light-yellow placeholder:text-light-yellow/50 hover:ring-accent/50 max-w-[144px] rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
                       />
                       <button
                         type="button"
@@ -341,7 +341,7 @@ onMounted(() => {
                   <button
                     :disabled="!itemToAdd"
                     type="submit"
-                    class="disabled:bg-gray-500 bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow flex-1 rounded-md p-1.5 transition-colors"
+                    class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow flex-1 rounded-md p-1.5 transition-colors disabled:bg-gray-500"
                   >
                     Adicionar
                   </button>
