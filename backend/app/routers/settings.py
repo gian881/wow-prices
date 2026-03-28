@@ -16,9 +16,26 @@ router = APIRouter(
 
 
 @router.get("/")
-def get_all_settings(db_session: Session = Depends(get_db)):
-    settings = db_session.exec(select(Settings)).all()
+def get_settings(
+    setting_keys: list[str] | None = None, db_session: Session = Depends(get_db)
+):
+    if setting_keys:
+        settings = db_session.exec(
+            select(Settings).where(Settings.key in setting_keys)
+        ).all()
+    else:
+        settings = db_session.exec(select(Settings)).all()
     return settings
+
+
+@router.get("/{setting_key}", response_model=Settings)
+def get_setting(setting_key: str, db_session: Session = Depends(get_db)):
+    setting = db_session.exec(
+        select(Settings).where(Settings.key == setting_key)
+    ).first()
+    if not setting:
+        raise HTTPException(status_code=404, detail="Configuração não encontrada")
+    return setting
 
 
 @router.put("/{setting_key}")
