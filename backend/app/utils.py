@@ -1,14 +1,18 @@
+import datetime
 import json
 import os
+import zoneinfo
 from typing import Any, Sequence
 
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup, Tag
 from sqlalchemy import Row
+from sqlmodel import Session, select
 
 from app.blizzard_api import fetch_blizzard_api
 from app.logger import get_logger
+from app.models import Settings
 from app.schemas import PriceGoldSilver, Quality
 from exceptions import EnvNotSetError
 from supabase import Client, create_client
@@ -140,3 +144,29 @@ async def get_item_blizzard_image_url(
             f"Failed to get Blizzard image URL for item {item_id}: {e}", exc_info=True
         )
         return None
+
+
+def best_price_window_start_date(db_session: Session) -> datetime.datetime | None:
+    best_price_window_days_db = db_session.exec(
+        select(Settings.value).where(Settings.key == "best_price_window_days")
+    ).one_or_none()
+
+    best_price_window_days = "all"
+
+    if best_price_window_days_db != "all" and best_price_window_days_db is not None:
+        best_price_window_days = int(best_price_window_days_db)
+
+    window_start = None
+    if best_price_window_days != "all":
+        sao_paulo = zoneinfo.ZoneInfo("America/Sao_Paulo")
+        now_sp = datetime.datetime.now(sao_paulo)
+        target_date = (now_sp - datetime.timedelta(days=best_price_window_days)).date()
+        window_start_local = datetime.datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
+            tzinfo=sao_paulo,
+        )
+        window_start = window_start_local.astimezone(datetime.timezone.utc)
+
+    return window_start

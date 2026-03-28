@@ -15,7 +15,7 @@ load_dotenv()
 
 logger = get_logger(__name__)
 
-from .routers import internal, items, notifications  # noqa: E402
+from .routers import internal, items, notifications, settings  # noqa: E402
 
 
 @asynccontextmanager
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(items.router)
 app.include_router(notifications.router)
+app.include_router(settings.router)
 app.include_router(internal.router)
 app.include_router(websocket.router)
 

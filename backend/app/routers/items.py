@@ -21,13 +21,16 @@ from app.schemas import (
     Intent,
     PriceDiff,
     PriceGoldSilver,
+    Rarity,
     ReturnItem,
+    SearchItem,
     Sign,
     TodayItem,
     TodayResponse,
     WeekResponse,
 )
 from app.utils import (
+    best_price_window_start_date,
     download_image_and_upload_to_supabase,
     get_item_quality,
     get_plotly_heatmap_data,
@@ -43,6 +46,8 @@ router = APIRouter(
 
 @router.get("/week", response_model=list[WeekResponse])
 def get_week_items(db_session: Session = Depends(get_db)):
+    window_start = best_price_window_start_date(db_session)
+
     results = db_session.execute(
         text("""
         WITH AggregatedHistory AS (
@@ -53,6 +58,8 @@ def get_week_items(db_session: Session = Depends(get_db)):
                 AVG(price) AS avg_price
             FROM
                 price_history
+            WHERE
+                (:window_start IS NULL OR "timestamp" >= :window_start)
             GROUP BY
                 item_id,
                 weekday_num,
@@ -97,7 +104,8 @@ def get_week_items(db_session: Session = Depends(get_db)):
         ORDER BY
             rp.weekday_num,
             rp.hour;
-        """)
+        """),
+        {"window_start": window_start},
     )
 
     return [
@@ -133,6 +141,9 @@ def get_today_items(db_session: Session = Depends(get_db)):
     today_weekday = (
         datetime.datetime.now().weekday() + 1
     ) % 7  # Deixando weekday igual ao do SQL
+
+    window_start = best_price_window_start_date(db_session)
+
     results = db_session.execute(
         text("""
         WITH AggregatedHistory AS (
@@ -143,6 +154,8 @@ def get_today_items(db_session: Session = Depends(get_db)):
                 AVG(price) AS avg_price
             FROM
                 price_history
+            WHERE
+                (:window_start IS NULL OR "timestamp" >= :window_start)
             GROUP BY
                 item_id,
                 weekday_num,
@@ -192,7 +205,7 @@ def get_today_items(db_session: Session = Depends(get_db)):
             rp.hour;
 
     """),
-        {"today_weekday": today_weekday},
+        {"today_weekday": today_weekday, "window_start": window_start},
     )
 
     return [
@@ -303,16 +316,14 @@ def get_items(
     ]
 
 
-@router.post("/{item_id}", status_code=201)
+@router.post("/{item_id}", status_code=201, response_model=Item)
 async def add_item(
     item_id: int,
     item_optionals: CreateItemOptions,
     db_session: Session = Depends(get_db),
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    result = db_session.execute(
-        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
-    ).first()
+    result = db_session.exec(select(1).where(Item.id == item_id)).first()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
     try:
@@ -343,18 +354,15 @@ async def add_item(
             )
             img_url = img_response["assets"][0]["value"]
             item_quality = await get_item_quality(item_id, httpx_client)
-            db_session.execute(
-                text(
-                    "INSERT INTO item_cache(item_id, name, blizzard_image_url, quality, rarity) VALUES (:item_id, :name, :blizzard_image_url, :quality, :rarity)"
-                ),
-                {
-                    "item_id": item_id,
-                    "name": item_name,
-                    "blizzard_image_url": img_url,
-                    "quality": item_quality,
-                    "rarity": item_rarity,
-                },
+
+            item_cache = ItemCache(
+                item_id=item_id,
+                name=item_name,
+                blizzard_image_url=img_url,
+                quality=item_quality,
+                rarity=item_rarity,
             )
+            db_session.add(item_cache)
             db_session.commit()
 
         img_path = img_url.split("/")[-1]
@@ -404,31 +412,28 @@ async def add_item(
         )
 
 
-@router.get("/{item_id}/lookup")
+@router.get("/{item_id}/lookup", response_model=SearchItem)
 async def get_item_blizzard(
     item_id: int,
     httpx_client: httpx.AsyncClient = Depends(get_http_client),
     db_session: Session = Depends(get_db),
-):
-    result = db_session.execute(
-        text("SELECT 1 FROM items WHERE id = :item_id"), {"item_id": item_id}
-    ).fetchone()
+) -> SearchItem:
+    result = db_session.exec(select(1).where(Item.id == item_id)).first()
     if result is not None:
         raise HTTPException(status_code=409, detail="Item já adicionado")
 
-    cached_item = db_session.execute(
-        text("SELECT * FROM item_cache WHERE item_id = :item_id"),
-        {"item_id": item_id},
-    ).fetchone()
+    cached_item = db_session.exec(
+        select(ItemCache).where(ItemCache.item_id == item_id)
+    ).first()
 
     if cached_item:
-        return {
-            "id": item_id,
-            "name": cached_item[1],
-            "image": cached_item[2],
-            "quality": cached_item[3],
-            "rarity": cached_item[4],
-        }
+        return SearchItem(
+            id=item_id,
+            name=cached_item.name,
+            image=cached_item.blizzard_image_url,
+            quality=cached_item.quality,
+            rarity=cached_item.rarity,
+        )
 
     try:
         item_response = await fetch_blizzard_api(
@@ -456,13 +461,13 @@ async def get_item_blizzard(
         )
         db_session.commit()
 
-        return {
-            "id": item_id,
-            "name": item_response["name"],
-            "image": img_url,
-            "quality": item_quality,
-            "rarity": item_response["quality"]["type"],
-        }
+        return SearchItem(
+            id=item_id,
+            name=item_response["name"],
+            image=img_url,
+            quality=item_quality,
+            rarity=Rarity(item_response["quality"]["type"]),
+        )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -639,6 +644,8 @@ def get_item(
     selling_diff_obj = PriceGoldSilver(gold=0, silver=0)
     buying_diff_obj = PriceGoldSilver(gold=0, silver=0)
 
+    window_start = best_price_window_start_date(db_session)
+
     if intent == "sell" or intent == "both":
         selling_data = db_session.execute(
             text(
@@ -659,6 +666,7 @@ def get_item(
                         price_history
                     WHERE
                         item_id = :item_id
+                        AND (:window_start IS NULL OR "timestamp" >= :window_start)
                     GROUP BY
                         weekday,
                         hour
@@ -667,7 +675,7 @@ def get_item(
                     LIMIT 1;
             """,
             ),
-            {"item_id": item_id},
+            {"item_id": item_id, "window_start": window_start},
         ).fetchone()
         if not selling_data:
             selling_data = ("", 0, 0)
@@ -696,6 +704,7 @@ def get_item(
                     price_history
                 WHERE
                     item_id = :item_id
+                    AND (:window_start IS NULL OR "timestamp" >= :window_start)
                 GROUP BY
                     weekday,
                     hour
@@ -703,7 +712,7 @@ def get_item(
                     best_avg_price ASC
                 LIMIT 1;
                  """),
-            {"item_id": item_id},
+            {"item_id": item_id, "window_start": window_start},
         ).fetchone()
         if not buying_data:
             buying_data = ("", 0, 0)

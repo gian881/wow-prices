@@ -324,8 +324,8 @@ async function saveSettings() {
       </div>
     </div>
     <div class="flex flex-col items-end justify-between gap-1 text-right">
-      <div class="flex gap-2 items-center">
-        <p v-if="!item.is_active" class="text-red-600 font-semibold">Item desativado</p>
+      <div class="flex items-center gap-2">
+        <p v-if="!item.is_active" class="font-semibold text-red-600">Item desativado</p>
         <item-settings-dialog
           @close="closeDialog"
           @save-settings="saveSettings"

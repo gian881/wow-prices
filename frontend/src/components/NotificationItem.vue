@@ -108,7 +108,7 @@ async function markAsRead() {
         <p class="text-light-yellow-200">{{ relativeTime }}</p>
       </div>
     </div>
-    <div class="flex gap-2 flex-col">
+    <div class="flex flex-col gap-2">
       <button
         class="ring-accent my-auto rounded-md bg-white/5 p-1.5 ring transition-colors hover:bg-white/8 active:bg-white/12"
         @click="markAsRead"

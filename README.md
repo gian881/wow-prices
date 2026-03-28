@@ -9,36 +9,36 @@ Aplicação web full-stack para análise de preços da API da Blizzard, com back
 
 ## 🎯 Principais Funcionalidades
 
--   **Coleta de Dados Automatizada:** Um serviço de fundo busca periodicamente dados de preços da API oficial da Blizzard, garantindo que as informações estejam sempre atualizadas.
--   **Visualização de Dados Interativa:** Frontend construído com Vue.js que utiliza Plotly.js para renderizar heatmaps e gráficos de linha, mostrando a variação de preços e quantidades por hora e dia da semana.
--   **Notificações em Tempo Real:** A aplicação usa WebSockets para notificar o frontend instantaneamente quando novos dados são processados, permitindo que os usuários atualizem suas visualizações sem recarregar a página.
--   **Configurações Personalizadas:** Os usuários podem definir configurações por item, como alertas de preço e intenção de compra ou venda.
--   **Armazenamento de Arquivos na Nuvem:** As imagens dos itens são salvas de forma persistente no Supabase Storage, com um sistema de verificação na inicialização do servidor para garantir a integridade dos dados.
+- **Coleta de Dados Automatizada:** Um serviço de fundo busca periodicamente dados de preços da API oficial da Blizzard, garantindo que as informações estejam sempre atualizadas.
+- **Visualização de Dados Interativa:** Frontend construído com Vue.js que utiliza Plotly.js para renderizar heatmaps e gráficos de linha, mostrando a variação de preços e quantidades por hora e dia da semana.
+- **Notificações em Tempo Real:** A aplicação usa WebSockets para notificar o frontend instantaneamente quando novos dados são processados, permitindo que os usuários atualizem suas visualizações sem recarregar a página.
+- **Configurações Personalizadas:** Os usuários podem definir configurações por item, como alertas de preço e intenção de compra ou venda.
+- **Armazenamento de Arquivos na Nuvem:** As imagens dos itens são salvas de forma persistente no Supabase Storage, com um sistema de verificação na inicialização do servidor para garantir a integridade dos dados.
 
 ## 🛠️ Tecnologias Utilizadas
 
 ### **Backend**
 
--   **Framework:** FastAPI
--   **Linguagem:** Python
--   **Banco de Dados:** PostgreSQL (gerenciado pelo Supabase)
--   **ORM:** SQLModel (baseado em SQLAlchemy e Pydantic)
--   **Comunicação Real-Time:** WebSockets
+- **Framework:** FastAPI
+- **Linguagem:** Python
+- **Banco de Dados:** PostgreSQL (gerenciado pelo Supabase)
+- **ORM:** SQLModel (baseado em SQLAlchemy e Pydantic)
+- **Comunicação Real-Time:** WebSockets
 
 ### **Frontend**
 
--   **Framework:** Vue.js 3 (com Composition API)
--   **Linguagem:** TypeScript
--   **Build Tool:** Vite
--   **Visualização de Dados:** Plotly.js
--   **Estilização:** Tailwind CSS & Shadcn UI
+- **Framework:** Vue.js 3 (com Composition API)
+- **Linguagem:** TypeScript
+- **Build Tool:** Vite
+- **Visualização de Dados:** Plotly.js
+- **Estilização:** Tailwind CSS & Shadcn UI
 
 ### **Infraestrutura e Deploy**
 
--   **Banco de Dados & Storage:** Supabase
--   **Containerização:** Docker (para ambiente de desenvolvimento com PostgreSQL)
--   **Hospedagem (Backend):** Render
--   **Hospedagem (Frontend):** Vercel
+- **Banco de Dados & Storage:** Supabase
+- **Containerização:** Docker (para ambiente de desenvolvimento com PostgreSQL)
+- **Hospedagem (Backend):** Render
+- **Hospedagem (Frontend):** Vercel
 
 ## ⚙️ Configuração e Instalação Local
 
@@ -46,10 +46,10 @@ Para rodar este projeto localmente, siga os passos abaixo.
 
 #### **Pré-requisitos**
 
--   [Git](https://git-scm.com/)
--   [Python 3.10+](https://www.python.org/)
--   [Node.js 18+](https://nodejs.org/) (com pnpm)
--   [Docker](https://www.docker.com/) (para o banco de dados PostgreSQL)
+- [Git](https://git-scm.com/)
+- [Python 3.10+](https://www.python.org/)
+- [Node.js 18+](https://nodejs.org/) (com pnpm)
+- [Docker](https://www.docker.com/) (para o banco de dados PostgreSQL)
 
 #### **1. Clonar o Repositório**
 
@@ -104,9 +104,8 @@ A aplicação frontend estará disponível em `http://localhost:5173` e o backen
 
 ## 🚀 Planos Futuros
 
--   [ ] **🗓️ Período Configurável:** Adicionar uma opção para que o usuário defina o período de tempo (ex: últimos 7 dias, último mês) a ser considerado para o cálculo do "melhor dia/hora".
--   [ ] **📊 Filtros nos Gráficos:** Implementar filtros interativos diretamente nos gráficos para analisar dados de forma mais granular.
--   [ ] **🔐 Contas:** Permitir que o usuário consiga criar uma conta e consiga rastrear seus próprios itens.
--   [ ] **🌐 Configuração de Timezone:** Permitir que os usuários configurem seu fuso horário local para que as análises de "melhor hora" seja baseada na sua região.
--   [ ] **🗓️ Período Configurável:** Adicionar uma opção para que o usuário defina o período de tempo (ex: últimos 7 dias, último mês) a ser considerado para o cálculo do "melhor dia/hora".
--   [ ] **📱 Suporte Mobile:** Melhorar a responsividade da interface para garantir uma experiência de uso otimizada em dispositivos móveis.
+- [x] **🗓️ Período Configurável:** Adicionar uma opção para que o usuário defina o período de tempo (ex: últimos 7 dias, último mês) a ser considerado para o cálculo do "melhor dia/hora".
+- [ ] **🌐 Configuração de Timezone:** Permitir que os usuários configurem seu fuso horário local para que as análises de "melhor hora" seja baseada na sua região.
+- [ ] **📊 Filtros nos Gráficos:** Implementar filtros interativos diretamente nos gráficos para analisar dados de forma mais granular.
+- [ ] **🔐 Contas:** Permitir que o usuário consiga criar uma conta e consiga rastrear seus próprios itens.
+- [ ] **📱 Suporte Mobile:** Melhorar a responsividade da interface para garantir uma experiência de uso otimizada em dispositivos móveis.

@@ -169,7 +169,7 @@ async function onSaveSettings() {
           />
         </div>
         <div class="flex items-start gap-4">
-          <div class="flex flex-col flex-1 gap-1">
+          <div class="flex flex-1 flex-col gap-1">
             <div class="font-title text-lg leading-[1.2] font-bold" for="quantityThreshold">
               Ativo
             </div>
@@ -183,7 +183,7 @@ async function onSaveSettings() {
               Está ativo
             </label>
           </div>
-          <div class="flex flex-col flex-1 gap-1">
+          <div class="flex flex-1 flex-col gap-1">
             <label class="font-title text-lg leading-[1.2] font-bold" for="quality"
               >Qualidade</label
             >

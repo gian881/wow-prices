@@ -152,3 +152,16 @@ class TodayItem(SimpleItem):
 class TodayResponse(BaseModel):
     hour: str
     items: list[TodayItem]
+
+
+class UpdateSettings(BaseModel):
+    key: str
+    value: str
+
+
+class SearchItem(BaseModel):
+    id: int
+    name: str
+    image: str
+    quality: Quality
+    rarity: Rarity

@@ -6,8 +6,6 @@ class EnvNotSetError(Exception):
             self.variable_name = ", ".join(variables)
         else:
             self.variable_name = variables
-        message = (
-            f"The environment variable(s) '{self.variable_name}' is not set."
-        )
+        message = f"The environment variable(s) '{self.variable_name}' is not set."
         self.message = message
         super().__init__(message, *args)
