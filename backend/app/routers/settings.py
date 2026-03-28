@@ -1,7 +1,10 @@
+from typing import Annotated
+
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
 )
 from sqlmodel import Session, select
 
@@ -17,11 +20,12 @@ router = APIRouter(
 
 @router.get("/")
 def get_settings(
-    setting_keys: list[str] | None = None, db_session: Session = Depends(get_db)
+    setting_keys: Annotated[list[str] | None, Query()] = None,
+    db_session: Session = Depends(get_db),
 ):
     if setting_keys:
         settings = db_session.exec(
-            select(Settings).where(Settings.key in setting_keys)
+            select(Settings).where(Settings.key.in_(setting_keys))  # type: ignore
         ).all()
     else:
         settings = db_session.exec(select(Settings)).all()
@@ -57,7 +61,7 @@ def update_settings(
     update_settings: list[UpdateSettings], db_session: Session = Depends(get_db)
 ):
     settings = db_session.exec(
-        select(Settings).where(Settings.key in map(lambda s: s.key, update_settings))
+        select(Settings).where(Settings.key.in_(map(lambda s: s.key, update_settings)))  # type: ignore
     ).all()
 
     if not settings:
