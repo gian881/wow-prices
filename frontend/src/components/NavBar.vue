@@ -111,7 +111,7 @@ onMounted(() => {
           </router-link>
         </li>
       </ul>
-      <div>
+      <div class="flex items-center gap-2">
         <GeneralSettingsDialog v-model="isSettingsOpen" />
         <popover>
           <popover-trigger as="button" class="relative">

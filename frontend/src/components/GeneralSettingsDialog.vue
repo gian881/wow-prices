@@ -21,6 +21,12 @@ import { getAllSettings, updateSetting } from '@/services/api/endpoints/settings
 import type { Setting } from '@/types/settings'
 import { onMounted, ref } from 'vue'
 
+const defaultWindowSetting = ref({
+  value: 0,
+  unit: 'days' as 'days' | 'months',
+  allPeriod: false,
+})
+
 const settings = ref<Setting[]>()
 const isOpen = defineModel('isOpen', { type: Boolean, default: false })
 const isSaving = ref(false)
@@ -37,7 +43,17 @@ async function loadSettings() {
     )
     if (convertedSettings.value === 0) {
       allPeriod.value = true
+      defaultWindowSetting.value = {
+        value: 0,
+        unit: 'days',
+        allPeriod: true,
+      }
     } else {
+      defaultWindowSetting.value = {
+        value: convertedSettings.value,
+        unit: convertedSettings.unit,
+        allPeriod: false,
+      }
       value.value = convertedSettings.value.toString()
       unit.value = convertedSettings.unit
     }
@@ -56,6 +72,11 @@ async function onSaveSettings() {
     const convertedSettings = numberOfDaysToMonthOrDays(updatedSetting.value)
     value.value = convertedSettings.value.toString()
     unit.value = convertedSettings.unit
+    defaultWindowSetting.value = {
+      value: convertedSettings.value,
+      unit: convertedSettings.unit,
+      allPeriod: allPeriod.value,
+    }
   } catch {
   } finally {
     isSaving.value = false
@@ -134,6 +155,14 @@ onMounted(() => {
           <button
             type="button"
             class="border-accent flex-1 rounded-md border bg-white/5 p-1.5 transition-colors hover:bg-white/12 active:bg-white/20"
+            @click="
+              () => {
+                isOpen = false
+                value = defaultWindowSetting.value.toString()
+                unit = defaultWindowSetting.unit
+                allPeriod = defaultWindowSetting.allPeriod
+              }
+            "
           >
             Cancelar
           </button>
