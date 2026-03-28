@@ -157,3 +157,11 @@ class TodayResponse(BaseModel):
 class UpdateSettings(BaseModel):
     key: str
     value: str
+
+
+class SearchItem(BaseModel):
+    id: int
+    name: str
+    image: str
+    quality: Quality
+    rarity: Rarity
