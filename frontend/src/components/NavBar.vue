@@ -2,51 +2,55 @@
 import wowLogo from '@/assets/wow-logo.png'
 import GeneralSettingsDialog from '@/components/GeneralSettingsDialog.vue'
 import BellIcon from '@/components/icons/BellIcon.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import NotificationItem from '@/components/NotificationItem.vue'
 import Popover from '@/components/ui/popover/Popover.vue'
 import PopoverContent from '@/components/ui/popover/PopoverContent.vue'
 import PopoverTrigger from '@/components/ui/popover/PopoverTrigger.vue'
-import { getNotifications, markNotificationsAsRead } from '@/services/api/endpoints/notification'
+import { getNotifications, markAllNotificationsAsRead } from '@/services/api/endpoints/notification'
 import { state as websocketState } from '@/services/websocketService'
-import type { Notification } from '@/types/notifications'
-import { isAxiosError } from 'axios'
-import { onMounted, ref, watch } from 'vue'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useIntersectionObserver } from '@vueuse/core'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import CheckIcon from './icons/CheckIcon.vue'
 
-const notifications = ref<Notification[]>([])
 const unreadNotificationsCount = ref(0)
 const isSettingsOpen = ref(false)
+const showReadNotifications = ref(false)
+const queryClient = useQueryClient()
 
-async function markAsReadAllBelow(id: number) {
-  const index = notifications.value.findIndex((n) => n.id === id)
-  if (index !== -1) {
-    const idsToMarkAsRead = notifications.value.slice(index).map((n) => n.id)
-    try {
-      await markNotificationsAsRead(idsToMarkAsRead)
-      notifications.value = notifications.value.filter((n) => !idsToMarkAsRead.includes(n.id))
-    } catch (error) {
-      if (isAxiosError(error)) {
-        console.error(
-          'Failed to mark notifications as read:',
-          error.response?.data || error.message,
-        )
-        return
-      }
-      console.error('Failed to mark notifications as read:', error)
-    }
+const { data, hasNextPage, fetchNextPage } = useInfiniteQuery({
+  staleTime: 1000 * 60, // 1 minute
+  queryKey: ['notifications', showReadNotifications],
+  queryFn: async ({ pageParam }) => {
+    const { data: notifications, meta } = await getNotifications(
+      !showReadNotifications.value,
+      pageParam,
+    )
+    return { notifications, meta }
+  },
+  initialPageParam: 1,
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getNextPageParam: (lastPage, _) => lastPage.meta.next_page,
+})
+
+const target = useTemplateRef('load')
+useIntersectionObserver(target, ([entry]) => {
+  if (entry.isIntersecting && hasNextPage) {
+    fetchNextPage()
   }
-}
+})
 
-async function loadNotifications() {
-  try {
-    const { data: returnedNotifications } = await getNotifications()
+const notifications = computed(() => data?.value?.pages.flatMap((page) => page.notifications) ?? [])
 
-    notifications.value = returnedNotifications
-    unreadNotificationsCount.value = returnedNotifications.filter((n) => !n.read).length
-  } catch (error) {
-    console.error('Failed to load notifications:', error)
-  }
-}
+const { mutate: markAllNotificationsAsReadMutation } = useMutation({
+  mutationFn: markAllNotificationsAsRead,
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications'] })
+  },
+})
 
 watch(
   () => websocketState.lastMessage,
@@ -57,22 +61,17 @@ watch(
       'data' in newMessage &&
       newMessage.action === 'new_notification'
     ) {
-      notifications.value.unshift(newMessage.data as Notification)
-      unreadNotificationsCount.value = notifications.value.filter((n) => !n.read).length
+      queryClient.invalidateQueries({ queryKey: ['notifications'] })
     }
   },
   { deep: true },
 )
-
-onMounted(() => {
-  loadNotifications()
-})
 </script>
 
 <template>
   <header class="flex items-center justify-between pt-8">
     <router-link to="/" class="flex items-center gap-4">
-      <img :src="wowLogo" alt="World of Warcraft: Ghosts of K'aresh Logo" />
+      <img :src="wowLogo" alt="World of Warcraft: Midnight Logo" />
       <h1 class="font-title text-5xl font-bold">WOW Prices</h1>
     </router-link>
     <div class="flex items-center gap-5">
@@ -133,26 +132,52 @@ onMounted(() => {
           </popover-trigger>
           <popover-content
             as="div"
-            class="text-light-yellow mt-1 flex max-h-[calc(100vh-122px)] w-[436px] flex-col gap-2 overflow-x-hidden overflow-y-auto rounded-md border-none bg-[#252329] p-4"
+            class="text-light-yellow relative mt-1 flex max-h-[calc(100vh-122px)] w-[436px] flex-col gap-4 overflow-x-hidden overflow-y-auto rounded-md border-none bg-[#252329] p-0 pb-4"
             align="end"
+            style="scrollbar-gutter: stable"
           >
-            <p v-if="notifications.length === 0" class="text-light-yellow/75 text-center text-sm">
-              Nenhuma nova notificação encontrada.
+            <div
+              class="sticky top-0 z-10 flex w-full items-center justify-between bg-[#252329] p-4 pe-1.5"
+            >
+              <h3 class="font-title text-xl font-bold">Notificações</h3>
+              <div class="flex gap-2">
+                <button
+                  :disabled="data?.pages[0].meta.total_unread === 0"
+                  class="flex items-center gap-2 rounded-md bg-white/10 p-1 px-3 transition-all hover:bg-white/12 active:bg-white/15"
+                  @click="() => markAllNotificationsAsReadMutation()"
+                  type="button"
+                >
+                  <check-icon />
+                </button>
+                <button
+                  class="flex items-center gap-2 rounded-md bg-white/10 p-1 px-3 inset-ring-2 transition-all hover:bg-white/12 active:bg-white/15"
+                  :class="{
+                    'inset-ring-accent': showReadNotifications,
+                    'hover:inset-ring-accent/50 inset-ring-transparent': !showReadNotifications,
+                  }"
+                  @click="showReadNotifications = !showReadNotifications"
+                  type="button"
+                >
+                  Mostrar lidas
+                </button>
+              </div>
+            </div>
+            <p
+              v-if="notifications.length === 0"
+              class="text-light-yellow/75 py-1 ps-4 pe-1.5 text-center text-sm"
+            >
+              Nenhuma notificação encontrada.
             </p>
-            <transition-group name="notifications-list">
-              <notification-item
-                v-for="notification in notifications"
-                :key="notification.id"
-                :notification="notification"
-                @mark-as-read="
-                  (id: number) => {
-                    notifications = notifications.filter((n) => n.id !== id)
-                    loadNotifications()
-                  }
-                "
-                @mark-as-read-all-below="markAsReadAllBelow"
-              />
-            </transition-group>
+            <ul v-else class="flex flex-col items-center gap-2 ps-4 pe-1.5">
+              <transition-group name="notifications-list">
+                <li v-for="notification in notifications" :key="notification.id">
+                  <notification-item :notification="notification" />
+                </li>
+                <div class="py-3" v-if="hasNextPage" ref="load">
+                  <LoadingSpinner />
+                </div>
+              </transition-group>
+            </ul>
           </popover-content>
         </popover>
       </div>

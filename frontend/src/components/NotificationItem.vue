@@ -2,53 +2,48 @@
 import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
 import CheckIcon from '@/components/icons/CheckIcon.vue'
-import DownCheckIcon from '@/components/icons/DownCheckIcon.vue'
 import ItemImage from '@/components/item/ItemImage.vue'
 import { markNotificationAsRead } from '@/services/api/endpoints/notification'
 import type { Notification } from '@/types/notifications'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useTimeAgoIntl } from '@vueuse/core'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 const props = defineProps<{
   notification: Notification
 }>()
 
-const emit = defineEmits<{
-  (e: 'mark-as-read', id: number): void
-  (e: 'mark-as-read-all-below', id: number): void
-}>()
-
 const title = computed(() => {
   switch (props.notification.type) {
     case 'price_above_alert':
-      return `Alerta de preço alto: ${props.notification.item.name}`
+      return 'Alerta de preço alto:'
     case 'price_below_alert':
-      return `Alerta de preço baixo: ${props.notification.item.name}`
+      return 'Alerta de preço baixo:'
     case 'price_above_best_avg_alert':
-      return `Venda sugerida: ${props.notification.item.name}`
+      return 'Venda sugerida:'
     case 'price_below_best_avg_alert':
-      return `Compra sugerida: ${props.notification.item.name}`
+      return 'Compra sugerida:'
     default:
       return 'Notificação'
   }
 })
 
-const markAsReadLoading = ref(false)
 const relativeTime = useTimeAgoIntl(new Date(props.notification.created_at), {
   locale: 'pt-BR',
 })
 
-async function markAsRead() {
-  markAsReadLoading.value = true
-  try {
-    await markNotificationAsRead(props.notification.id)
-    emit('mark-as-read', props.notification.id)
-  } catch (error) {
-    console.error('Failed to mark notification as read:', error)
-  } finally {
-    markAsReadLoading.value = false
-  }
-}
+const queryClient = useQueryClient()
+
+const { mutate: markAsRead, isPending } = useMutation({
+  mutationFn: async (id: number) => {
+    try {
+      await markNotificationAsRead(id)
+      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    } catch (error) {
+      console.error('Failed to mark notification as read', error)
+    }
+  },
+})
 </script>
 
 <template>
@@ -67,9 +62,9 @@ async function markAsRead() {
       />
     </router-link>
     <div class="flex flex-col gap-0.5">
-      <router-link :to="`/item/${notification.item.id}`" class="leading-tight font-semibold">{{
-        title
-      }}</router-link>
+      <router-link :to="`/item/${notification.item.id}`" class="leading-tight font-semibold"
+        >{{ title }} {{ props.notification.item.name }}</router-link
+      >
       <div class="w-full text-xs">
         <p class="text-xs leading-normal">
           <span class="font-medium">{{ notification.item.name }}</span>
@@ -111,19 +106,11 @@ async function markAsRead() {
     <div class="flex flex-col gap-2">
       <button
         class="ring-accent my-auto rounded-md bg-white/5 p-1.5 ring transition-colors hover:bg-white/8 active:bg-white/12"
-        @click="markAsRead"
-        :disabled="markAsReadLoading"
+        @click="() => markAsRead(notification.id)"
+        :disabled="isPending"
         v-if="!notification.read"
       >
         <check-icon />
-      </button>
-      <button
-        class="ring-accent my-auto rounded-md bg-white/5 p-1.5 ring transition-colors hover:bg-white/8 active:bg-white/12"
-        @click="$emit('mark-as-read-all-below', notification.id)"
-        :disabled="markAsReadLoading"
-        v-if="!notification.read"
-      >
-        <down-check-icon />
       </button>
     </div>
   </div>

@@ -1,13 +1,23 @@
 import type { NotificationsResponse } from '@/types/api/notifications'
 import { api } from '../client'
 
-export async function getNotifications() {
-  const response = await api.get<NotificationsResponse>(`/notifications`)
+export async function getNotifications(
+  ignoreRead: boolean = false,
+  page: number = 1,
+  limit: number = 10,
+) {
+  const response = await api.get<NotificationsResponse>(`/notifications/`, {
+    params: {
+      ignore_read: ignoreRead,
+      page,
+      limit,
+    },
+  })
   return response.data
 }
 
-export async function markNotificationsAsRead(ids: number[]) {
-  const response = await api.post(`/notifications/mark-read`, ids)
+export async function markAllNotificationsAsRead() {
+  const response = await api.post(`/notifications/mark-all-read`)
   return response.data
 }
 
