@@ -1,4 +1,5 @@
 import datetime
+import string
 
 from fastapi import (
     APIRouter,
@@ -7,7 +8,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from sqlmodel import Session, and_, col, desc, func, select, text
+from sqlmodel import Session, and_, col, desc, func, not_, select, text
 
 from app.dependencies import get_db
 from app.models import Item, Notification
@@ -21,53 +22,28 @@ router = APIRouter(
 
 
 @router.post(
-    "/mark-read",
+    "/mark-all-read",
     status_code=status.HTTP_200_OK,
     responses={500: {"model": ErrorResponse}},
 )
-async def mark_notifications_as_read(
-    notification_ids: list[int], db_session: Session = Depends(get_db)
-):
-    if not notification_ids:
-        return {
-            "status": "ok",
-            "message": "Nenhum ID de notificação fornecido, nenhuma ação foi tomada",
-            "unknown_notifications": [],
-        }
+async def mark_all_notifications_as_read(db_session: Session = Depends(get_db)):
+    """Marca todas as notificações como lidas."""
     try:
-        placeholders = ",".join([f":id{i}" for i in range(len(notification_ids))])
-        params = {f"id{i}": notification_ids[i] for i in range(len(notification_ids))}
-
-        db_session.execute(
-            text(f"UPDATE notifications SET read = TRUE WHERE id IN ({placeholders})"),
-            params,
+        result = db_session.execute(
+            text("UPDATE notifications SET read = true WHERE read = false;")
         )
 
         db_session.commit()
 
-        existing_notifications = db_session.execute(
-            text(
-                f"SELECT id FROM notifications WHERE id IN ({placeholders})",
-            ),
-            params,
-        ).fetchall()
-
-        existing_ids = {row[0] for row in existing_notifications}
-
-        unknown_ids = [id for id in notification_ids if id not in existing_ids]
-
         return {
-            "status": "ok",
-            # "message": f"{updated_count} notificações foram marcadas como lidas.",
-            "unknown_notifications": unknown_ids,
+            "message": f"{result.rowcount} notificações foram marcadas como lidas.",  # type: ignore
         }
 
     except Exception as e:
         return JSONResponse(
             status_code=500,
             content={
-                "status": "error",
-                "message": f"Erro: {e}",
+                "message": str(e),
             },
         )
 
@@ -89,11 +65,14 @@ async def mark_notification_as_read(
     db_session.add(existing_notification)
     db_session.commit()
 
-    return {"message": "Notificação marcada como lida"}
+    return {
+        "notification": existing_notification.model_dump_json(),
+        "message": "Notificação marcada como lida",
+    }
 
 
 @router.get("/")
-async def get_latest_notifications(
+async def get_notifications(
     limit: int = 10,
     page: int = 1,
     ignore_read: bool = False,
@@ -105,13 +84,13 @@ async def get_latest_notifications(
     if ignore_read:
         notifications = db_session.exec(
             select(Notification, Item)
-            .where(and_(not Notification.read, Notification.item_id == Item.id))
+            .where(and_(not_(Notification.read), Notification.item_id == Item.id))
             .offset((page - 1) * limit)
             .limit(limit)
             .order_by(desc(Notification.created_at))
         ).fetchall()
         total = db_session.exec(
-            select(func.count(col(Notification.id))).where(not Notification.read)
+            select(func.count(col(Notification.id))).where(not_(Notification.read))
         ).one()
     else:
         notifications = db_session.exec(
@@ -123,12 +102,15 @@ async def get_latest_notifications(
         ).fetchall()
         total = db_session.exec(select(func.count(col(Notification.id)))).one()
 
+    total_unread = db_session.exec(
+        select(func.count(col(Notification.id))).where(not_(Notification.read))
+    ).one()
+
     return {
         "meta": {
-            "page": page,
-            "limit": limit,
+            "next_page": page + 1 if (page * limit) < total else None,
+            "total_unread": total_unread,
             "total": total,
-            "max_page": (total + limit - 1) // limit,
         },
         "data": [
             {

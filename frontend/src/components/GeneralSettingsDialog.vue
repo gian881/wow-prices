@@ -21,6 +21,7 @@ import { getAllSettings, updateSetting } from '@/services/api/endpoints/settings
 import type { Setting } from '@/types/settings'
 import { onMounted, ref } from 'vue'
 
+const isOpen = ref(false)
 const defaultWindowSetting = ref({
   value: 0,
   unit: 'days' as 'days' | 'months',
@@ -28,7 +29,6 @@ const defaultWindowSetting = ref({
 })
 
 const settings = ref<Setting[]>()
-const isOpen = defineModel('isOpen', { type: Boolean, default: false })
 const isSaving = ref(false)
 
 const value = ref('')
