@@ -23,12 +23,13 @@ const { data, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuer
       !showReadNotifications.value,
       pageParam,
     )
-    return { notifications, meta }
+    unreadNotificationsCount.value = meta.total_unread || 0
+    return { notifications, nextPage: meta.next_page }
   },
   initialPageParam: 1,
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  getNextPageParam: (lastPage, _) => lastPage.meta.next_page,
+  getNextPageParam: (lastPage, _) => lastPage.nextPage,
 })
 
 const notifications = computed(() =>
@@ -81,7 +82,7 @@ const { mutate: markAllNotificationsAsReadMutation } = useMutation({
         <h3 class="font-title text-xl font-bold">Notificações</h3>
         <div class="flex gap-2">
           <button
-            :disabled="data?.pages[0].meta.total_unread === 0"
+            :disabled="unreadNotificationsCount === 0"
             class="flex items-center gap-2 rounded-md bg-white/10 p-1 px-3 transition-all hover:bg-white/12 active:bg-white/15"
             @click="() => markAllNotificationsAsReadMutation()"
             type="button"
