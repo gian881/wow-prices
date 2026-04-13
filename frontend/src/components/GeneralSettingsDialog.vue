@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// import SettingsIcon from '@/components/icons/SettingsIcon.vue'
 import {
   Dialog,
   DialogContent,
