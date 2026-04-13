@@ -3,9 +3,9 @@ import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
 import NotifyDownIcon from '@/components/icons/NotifyDownIcon.vue'
 import NotifyUpIcon from '@/components/icons/NotifyUpIcon.vue'
-import SearchIcon from '@/components/icons/SearchIcon.vue'
 import ItemImage from '@/components/item/ItemImage.vue'
 import ItemOnHome from '@/components/item/ItemOnHome.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import {
   Dialog,
   DialogContent,
@@ -24,43 +24,39 @@ import {
 } from '@/components/ui/select'
 import { createItem, getItems, lookupItem } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
-import type { Item } from '@/types/item'
 import { isNotificationOn, toggleNotification } from '@/utils'
-import { computed, onMounted, ref, watch } from 'vue'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { computed, ref, watch } from 'vue'
 
-const isAllItemsLoading = ref(false)
 const allItemsError = ref<string | null>(null)
-const items = ref<Item[]>([])
 const showInactive = ref(false)
+const queryClient = useQueryClient()
 
-async function fetchItems() {
-  isAllItemsLoading.value = true
-  allItemsError.value = null
-
-  try {
-    items.value = await getItems({
+const {
+  data: items,
+  isLoading,
+  isError,
+} = useQuery({
+  queryKey: ['items', showInactive],
+  queryFn: () =>
+    getItems({
       order_by: 'price',
       order: 'desc',
       show_inactive: showInactive.value,
-    })
-  } catch (err) {
-    if (err instanceof Error) {
-      allItemsError.value = err.message
-    } else {
-      allItemsError.value = String(err)
-    }
-  } finally {
-    isAllItemsLoading.value = false
-  }
-}
+    }),
+  staleTime: 1000 * 60 * 60,
+})
 
 const sellItems = computed(() => {
+  if (!items.value) return []
   return items.value.filter((item) => item.intent === 'sell')
 })
 const buyItems = computed(() => {
+  if (!items.value) return []
   return items.value.filter((item) => item.intent === 'buy')
 })
 const bothItems = computed(() => {
+  if (!items.value) return []
   return items.value.filter((item) => item.intent === 'both')
 })
 
@@ -79,8 +75,6 @@ const belowAlert = ref({
   silver: 0,
 })
 
-const itemToAdd = ref<Pick<Item, 'id' | 'name' | 'image' | 'quality' | 'rarity'> | null>(null)
-
 function closeDialog() {
   isAddItemDialogOpen.value = false
 
@@ -97,37 +91,35 @@ function closeDialog() {
     gold: 0,
     silver: 0,
   }
-  itemToAdd.value = null
 }
 
-async function searchItem() {
-  if (!id.value) return
+const {
+  data: itemToAdd,
+  isLoading: isSearchingItem,
+  isError: isSearchItemError,
+  error: searchItemError,
+  refetch,
+} = useQuery({
+  queryKey: ['lookupItem', id],
+  queryFn: () => lookupItem(id.value),
+  enabled: false,
+  retry: false,
+})
 
-  try {
-    itemToAdd.value = await lookupItem(id.value)
-  } catch (error) {
-    console.error('Erro ao buscar item:', error)
-  }
-}
-
-async function addItem() {
-  if (!itemToAdd.value) return
-
-  try {
-    await createItem({
-      ...itemToAdd.value,
-      intent: intent.value,
-      notifySell: notifySell.value,
-      notifyBuy: notifyBuy.value,
-      quantityThreshold: quantityThreshold.value,
-      aboveAlert: aboveAlert.value,
-      belowAlert: belowAlert.value,
-    })
+const { mutate: createItemMutation } = useMutation({
+  mutationFn: createItem,
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['items', showInactive.value] })
+    queryClient.invalidateQueries({ queryKey: ['todayItems'] })
+    queryClient.invalidateQueries({ queryKey: ['weekItems'] })
 
     closeDialog()
-  } catch (error) {
-    console.error('Erro ao adicionar item:', error)
-  }
+  },
+})
+
+function searchItem() {
+  if (!id.value) return
+  refetch()
 }
 
 watch(
@@ -135,19 +127,11 @@ watch(
   (newMessage) => {
     if (!newMessage) return
     if ('action' in newMessage && newMessage.action === 'new_data') {
-      fetchItems()
+      queryClient.invalidateQueries({ queryKey: ['items', showInactive.value] })
     }
   },
   { deep: true },
 )
-
-watch(showInactive, () => {
-  fetchItems()
-})
-
-onMounted(() => {
-  fetchItems()
-})
 </script>
 
 <template>
@@ -181,7 +165,22 @@ onMounted(() => {
               class="text-light-yellow bg-midnight-light-200 px-6 py-4 md:max-w-[540px]"
               as-child
             >
-              <form @submit.prevent="addItem">
+              <form
+                @submit.prevent="
+                  () => {
+                    if (!itemToAdd) return
+                    createItemMutation({
+                      ...itemToAdd,
+                      intent: intent,
+                      notifySell: notifySell,
+                      notifyBuy: notifyBuy,
+                      quantityThreshold: quantityThreshold,
+                      aboveAlert: aboveAlert,
+                      belowAlert: belowAlert,
+                    })
+                  }
+                "
+              >
                 <DialogHeader class="flex flex-row items-end justify-between">
                   <DialogTitle>Adicionar item</DialogTitle>
                 </DialogHeader>
@@ -196,16 +195,16 @@ onMounted(() => {
                         v-model="id"
                         placeholder="Digite o id do item"
                         class="focus:ring-accent text-light-yellow placeholder:text-light-yellow/50 hover:ring-accent/50 max-w-[144px] rounded-md bg-white/10 px-2 py-1.5 text-sm ring-2 ring-transparent transition-shadow outline-none"
+                        @blur="() => searchItem()"
                       />
-                      <button
-                        type="button"
-                        @click="searchItem"
-                        class="bg-accent/80 hover:bg-accent/90 active:bg-accent button-shadow rounded-md p-1.5 transition-colors"
-                      >
-                        <search-icon />
-                      </button>
                     </div>
-                    <div class="flex items-center gap-2" v-if="itemToAdd">
+                    <div v-if="isSearchingItem" class="flex items-center gap-2">
+                      <loading-spinner />
+                    </div>
+                    <div v-if="isSearchItemError" class="flex items-center gap-2">
+                      {{ searchItemError }}
+                    </div>
+                    <div class="flex items-center gap-2" v-else-if="itemToAdd">
                       <item-image
                         :image="itemToAdd.image"
                         :name="itemToAdd.name"
@@ -352,11 +351,11 @@ onMounted(() => {
         </div>
       </div>
 
-      <div v-if="isAllItemsLoading" class="mt-4 text-center">Carregando todos os itens...</div>
-      <div v-if="allItemsError" class="mt-4 text-center text-red-500">
+      <div v-if="isLoading" class="mt-4 text-center">Carregando todos os itens...</div>
+      <div v-if="isError" class="mt-4 text-center text-red-500">
         Erro ao carregar todos os itens: {{ allItemsError }}
       </div>
-      <div v-if="!isAllItemsLoading && !allItemsError" class="mt-4">
+      <div v-if="!isLoading && !isError" class="mt-4">
         <div v-if="sellItems.length > 0" class="mb-4">
           <h3 class="font-title text-2xl font-bold">Itens para vender</h3>
           <div

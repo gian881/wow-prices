@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import SettingsIcon from '@/components/icons/SettingsIcon.vue'
 import {
   Dialog,
   DialogContent,
@@ -18,8 +17,11 @@ import {
 } from '@/components/ui/select'
 import { numberOfDaysToMonthOrDays, valueUnitToDays } from '@/lib/utils'
 import { getAllSettings, updateSetting } from '@/services/api/endpoints/settings'
-import type { Setting } from '@/types/settings'
-import { onMounted, ref } from 'vue'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { SettingsIcon } from 'lucide-vue-next'
+import { ref, watch } from 'vue'
+
+const queryClient = useQueryClient()
 
 const isOpen = ref(false)
 const defaultWindowSetting = ref({
@@ -28,19 +30,25 @@ const defaultWindowSetting = ref({
   allPeriod: false,
 })
 
-const settings = ref<Setting[]>()
-const isSaving = ref(false)
+const { data: settings } = useQuery({
+  queryKey: ['settings'],
+  queryFn: getAllSettings,
+  staleTime: 1000 * 60 * 60,
+})
 
-const value = ref('')
+const value = ref('0')
 const unit = ref<'days' | 'months'>('days')
 const allPeriod = ref(false)
 
-async function loadSettings() {
-  try {
-    settings.value = await getAllSettings()
+watch(
+  settings,
+  (newSettings) => {
+    if (!newSettings) return
+
     const convertedSettings = numberOfDaysToMonthOrDays(
-      settings.value.find((s) => s.key === 'best_price_window_days')?.value ?? '0',
+      newSettings.find((s) => s.key === 'best_price_window_days')?.value ?? '0',
     )
+
     if (convertedSettings.value === 0) {
       allPeriod.value = true
       defaultWindowSetting.value = {
@@ -48,6 +56,8 @@ async function loadSettings() {
         unit: 'days',
         allPeriod: true,
       }
+      value.value = '0'
+      unit.value = 'days'
     } else {
       defaultWindowSetting.value = {
         value: convertedSettings.value,
@@ -56,19 +66,20 @@ async function loadSettings() {
       }
       value.value = convertedSettings.value.toString()
       unit.value = convertedSettings.unit
+      allPeriod.value = false
     }
-  } catch {
-  } finally {
-  }
-}
+  },
+  { immediate: true },
+)
 
-async function onSaveSettings() {
-  try {
-    isSaving.value = true
-    const updatedSetting = await updateSetting(
+const { mutate: onSaveSettings, isPending: isSaving } = useMutation({
+  mutationFn: async () => {
+    return await updateSetting(
       'best_price_window_days',
       allPeriod.value ? 'all' : valueUnitToDays(value.value, unit.value),
     )
+  },
+  onSuccess: (updatedSetting) => {
     const convertedSettings = numberOfDaysToMonthOrDays(updatedSetting.value)
     value.value = convertedSettings.value.toString()
     unit.value = convertedSettings.unit
@@ -77,14 +88,13 @@ async function onSaveSettings() {
       unit: convertedSettings.unit,
       allPeriod: allPeriod.value,
     }
-  } catch {
-  } finally {
-    isSaving.value = false
-  }
-}
-
-onMounted(() => {
-  loadSettings()
+    queryClient.invalidateQueries({ queryKey: ['settings'] })
+    queryClient.invalidateQueries({ queryKey: ['items'] })
+    queryClient.invalidateQueries({ queryKey: ['calculatorItems'] })
+    queryClient.invalidateQueries({ queryKey: ['todayItems'] })
+    queryClient.invalidateQueries({ queryKey: ['item'] })
+    queryClient.invalidateQueries({ queryKey: ['weekItems'] })
+  },
 })
 </script>
 
@@ -102,7 +112,7 @@ onMounted(() => {
       class="text-light-yellow bg-midnight-light-200 border-none p-4 sm:max-w-[620px]"
       as-child
     >
-      <form @submit.prevent="onSaveSettings">
+      <form @submit.prevent="() => onSaveSettings()">
         <DialogHeader>
           <DialogTitle>Configurações gerais</DialogTitle>
         </DialogHeader>

@@ -2,11 +2,17 @@
 import ItemOnHome from '@/components/item/ItemOnHome.vue'
 import { getWeekItems } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
-import type { WeekItem } from '@/types/item'
 import { getTodayWeekdayIndex } from '@/utils'
-import { onMounted, ref, watch } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { watch } from 'vue'
 
-const items = ref<WeekItem[]>([])
+const queryClient = useQueryClient()
+
+const { data, isLoading, error, isError } = useQuery({
+  queryKey: ['weekItems'],
+  queryFn: getWeekItems,
+  staleTime: 1000 * 60 * 60, // 1 hour
+})
 
 const daysOfWeek = [
   { normalizedName: 'domingo', displayName: 'Domingo' },
@@ -18,30 +24,24 @@ const daysOfWeek = [
   { normalizedName: 'sabado', displayName: 'Sábado' },
 ]
 
-async function fetchWeekItems() {
-  items.value = await getWeekItems()
-}
-
 watch(
   () => websocketState.lastMessage,
   (newMessage) => {
     if (!newMessage) return
     if ('action' in newMessage && newMessage.action === 'new_data') {
-      fetchWeekItems()
+      queryClient.invalidateQueries({ queryKey: ['weekItems'] })
     }
   },
   { deep: true },
 )
-
-onMounted(async () => {
-  await fetchWeekItems()
-})
 </script>
 
 <template>
   <main class="mt-6">
     <h1 class="font-title text-3xl font-bold">Semana</h1>
-    <div class="bg-midnight-light-200 mt-6 rounded-lg p-2">
+    <div v-if="isLoading">Carregando</div>
+    <div v-if="isError">{{ error }}</div>
+    <div v-if="data" class="bg-midnight-light-200 mt-6 rounded-lg p-2">
       <div class="grid w-full grid-cols-7 gap-4">
         <p
           v-for="(day, index) in daysOfWeek"
@@ -54,7 +54,7 @@ onMounted(async () => {
       <div class="mt-4 grid w-full grid-cols-7 gap-4">
         <div class="flex flex-col gap-4" v-for="day in daysOfWeek" :key="day.normalizedName">
           <div
-            v-for="hour in items.find((item) => item.weekday === day.normalizedName)?.hours"
+            v-for="hour in data.find((item) => item.weekday === day.normalizedName)?.hours"
             :key="hour.hour"
             class="bg-midnight-light-150 flex flex-col gap-1.5 rounded-lg px-1 py-2"
           >

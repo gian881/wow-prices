@@ -22,7 +22,10 @@ defineEmits<{
 }>()
 </script>
 <template>
-  <div class="flex gap-3 rounded-lg p-2 transition-colors duration-500 hover:bg-white/5">
+  <div
+    class="flex gap-3 rounded-lg p-2 transition-colors duration-500 hover:bg-white/5"
+    :title="name"
+  >
     <router-link :to="`/item/${id}`" class="shrink-0">
       <item-image
         :name="name"

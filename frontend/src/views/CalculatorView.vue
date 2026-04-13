@@ -5,27 +5,56 @@ import ItemOnCalculator from '@/components/item/ItemOnCalculator.vue'
 import { getItems } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
 import type { Item } from '@/types/item'
-import { computed, onMounted, ref, watch } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { computed, watch } from 'vue'
 
 export type CalculatorItem = Item & {
   quantity: number
 }
 
-const items = ref<CalculatorItem[]>([])
+const queryClient = useQueryClient()
 
-async function fetchItems() {
-  try {
+const { data: items } = useQuery({
+  queryKey: ['calculatorItems'],
+  queryFn: async () => {
     const returnedItems = await getItems({ intent: 'sell' })
-    items.value = returnedItems.map((item) => ({ ...item, quantity: 0 }))
-  } catch (error) {
-    console.error('Error fetching items:', error)
-  }
-}
+    const savedItems = localStorage.getItem('items')
+
+    if (!savedItems) {
+      return returnedItems.map((item) => ({
+        ...item,
+        quantity: 0,
+      }))
+    }
+
+    const parsedItems = JSON.parse(savedItems) as { id: number; quantity: number }[]
+
+    const calculatorItems: CalculatorItem[] = returnedItems.map((item) => {
+      const savedItem = parsedItems.find((saved) => saved.id === item.id)
+      if (savedItem) {
+        return {
+          ...item,
+          quantity: savedItem.quantity,
+        }
+      }
+      return {
+        ...item,
+        quantity: 0,
+      }
+    })
+
+    return calculatorItems
+  },
+  staleTime: 1000 * 60 * 60,
+})
 
 const totalPrice = computed<{
   gold: number
   silver: number
 }>(() => {
+  if (!items.value) {
+    return { gold: 0, silver: 0 }
+  }
   return items.value.reduce(
     (acc, item) => {
       acc.gold +=
@@ -38,8 +67,7 @@ const totalPrice = computed<{
 })
 
 function saveItemQuantities() {
-  console.log('Saving item quantities:', items.value)
-  console.log('Total price:', totalPrice.value)
+  if (!items.value) return
   localStorage.setItem(
     'items',
     JSON.stringify(
@@ -49,24 +77,6 @@ function saveItemQuantities() {
       })),
     ),
   )
-  console.log('Item quantities saved to localStorage')
-  const savedItems = localStorage.getItem('items')
-  console.log('Saved items from localStorage:', savedItems)
-}
-
-function loadItemQuantities() {
-  const savedItems = localStorage.getItem('items')
-  if (savedItems) {
-    const parsedItems = JSON.parse(savedItems) as { id: number; quantity: number }[]
-    parsedItems.forEach((savedItem) => {
-      const item = items.value.find((item) => item.id === savedItem.id)
-      if (item) {
-        item.quantity = savedItem.quantity
-      } else {
-        console.warn(`Item with id ${savedItem.id} not found in fetched items`)
-      }
-    })
-  }
 }
 
 watch(
@@ -74,16 +84,11 @@ watch(
   (newMessage) => {
     if (!newMessage) return
     if ('action' in newMessage && newMessage.action === 'new_data') {
-      fetchItems()
+      queryClient.invalidateQueries({ queryKey: ['calculatorItems'] })
     }
   },
   { deep: true },
 )
-
-onMounted(async () => {
-  await fetchItems()
-  loadItemQuantities()
-})
 </script>
 
 <template>
@@ -102,7 +107,15 @@ onMounted(async () => {
         :quantity="item.quantity"
         @input="
           (quantity) => {
-            item.quantity = parseInt(quantity, 10) ? parseInt(quantity, 10) : 0
+            queryClient.setQueryData(['calculatorItems'], (oldData: CalculatorItem[]) => {
+              if (!oldData) return oldData
+              return oldData.map((d) => {
+                if (d.id === item.id) {
+                  return { ...d, quantity: parseInt(quantity, 10) ? parseInt(quantity, 10) : 0 }
+                }
+                return d
+              })
+            })
           }
         "
         @blur="saveItemQuantities"
