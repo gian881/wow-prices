@@ -3,35 +3,57 @@ import goldImage from '@/assets/gold.png'
 import silverImage from '@/assets/silver.png'
 import ItemImage from '@/components/item/ItemImage.vue'
 import ItemSettingsDialog from '@/components/item/ItemSettingsDialog.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { getItem, getItemPlotData } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
-import type { DetailedItem, ItemPlotData } from '@/types/item'
 import { customBuyColorScale, customSellColorScale } from '@/utils'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useTimeAgoIntl } from '@vueuse/core'
 // @ts-expect-error we have no types for this package
 import Plotly from 'plotly.js-cartesian-dist-min'
-import { nextTick, ref, watch, type ComputedRef } from 'vue'
+import { nextTick, watch, type ComputedRef } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const item = ref<DetailedItem | null>()
-
-const loading = ref(false)
-const error = ref<string | null>(null)
-
-const isSettingsDialogOpen = ref(false)
-const itemPlotData = ref<ItemPlotData>()
-
-watch(
-  () => route.params.id,
-  (id) => {
-    fetchItem(id)
-    fetchItemPlotData(id)
-  },
-  { immediate: true },
-)
+const queryClient = useQueryClient()
 
 let relativeTime: ComputedRef<string> | null = null
+
+watch(
+  () => websocketState.lastMessage,
+  (newMessage) => {
+    if (!newMessage) return
+    if ('action' in newMessage && newMessage.action === 'new_data') {
+      queryClient.invalidateQueries({ queryKey: ['item', route.params.id] })
+      queryClient.invalidateQueries({ queryKey: ['itemPlotData', route.params.id] })
+    }
+  },
+  { deep: true },
+)
+
+const {
+  data: item,
+  isLoading: loading,
+  error,
+  isError,
+} = useQuery({
+  queryKey: ['item', route.params.id],
+  queryFn: async () => {
+    const itemData = await getItem(route.params.id)
+    relativeTime = useTimeAgoIntl(new Date(itemData.last_timestamp), {
+      locale: 'pt-BR',
+    })
+    const qualityString =
+      itemData.quality === 'normal' ? '' : ` - ${itemData.quality.replace(/\D/g, '')}`
+    document.title = `${itemData.name}${qualityString} - WOW Prices`
+    return itemData
+  },
+})
+
+const { data: itemPlotData, isLoading: isPlotDataLoading } = useQuery({
+  queryKey: ['itemPlotData', route.params.id],
+  queryFn: async () => await getItemPlotData(route.params.id),
+})
 
 watch(itemPlotData, (newItem) => {
   if (newItem && newItem.average_price_data) {
@@ -189,64 +211,11 @@ watch(itemPlotData, (newItem) => {
     })
   }
 })
-
-watch(
-  () => websocketState.lastMessage,
-  (newMessage) => {
-    if (!newMessage) return
-    if ('action' in newMessage && newMessage.action === 'new_data') {
-      fetchItem(route.params.id)
-    }
-  },
-  { deep: true },
-)
-
-async function fetchItemPlotData(id: string | string[]) {
-  try {
-    itemPlotData.value = await getItemPlotData(id)
-  } catch (err) {
-    console.error('Erro ao buscar dados para os gráficos:', err)
-  }
-}
-
-async function fetchItem(id: string | string[]) {
-  error.value = item.value = null
-  loading.value = true
-
-  try {
-    const responseData = await getItem(id)
-    item.value = responseData
-    relativeTime = useTimeAgoIntl(new Date(responseData.last_timestamp), {
-      locale: 'pt-BR',
-    })
-
-    const qualityString =
-      responseData.quality === 'normal' ? '' : ` - ${responseData.quality.replace(/\D/g, '')}`
-    document.title = `${responseData.name}${qualityString} - WOW Prices`
-  } catch (err) {
-    if (err instanceof Error) {
-      error.value = err.message
-    } else {
-      error.value = String(err)
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-function closeDialog() {
-  isSettingsDialogOpen.value = false
-}
-
-async function saveSettings() {
-  isSettingsDialogOpen.value = false
-  await fetchItem(route.params.id)
-}
 </script>
 
 <template>
   <p v-if="loading">Carregando dados...</p>
-  <p v-if="error">{{ error }}</p>
+  <p v-if="isError">{{ error }}</p>
   <div class="mt-8 flex justify-between" v-if="item">
     <div class="flex items-center gap-6">
       <item-image
@@ -326,12 +295,7 @@ async function saveSettings() {
     <div class="flex flex-col items-end justify-between gap-1 text-right">
       <div class="flex items-center gap-2">
         <p v-if="!item.is_active" class="font-semibold text-red-600">Item desativado</p>
-        <item-settings-dialog
-          @close="closeDialog"
-          @save-settings="saveSettings"
-          v-model:open="isSettingsDialogOpen"
-          :item="item"
-        />
+        <item-settings-dialog :item="item" />
       </div>
 
       <p class="text-lg">
@@ -346,18 +310,35 @@ async function saveSettings() {
   </div>
 
   <h2 class="font-title mt-8 text-3xl font-bold">Histórico de preços</h2>
-
-  <div class="bg-midnight-light-200 mt-2 rounded-lg p-2">
+  <div
+    class="bg-midnight-light-200 mt-2 rounded-lg p-2"
+    :class="{
+      'flex items-center justify-center py-20': isPlotDataLoading,
+    }"
+  >
+    <loading-spinner class="size-10" v-if="isPlotDataLoading" />
     <div id="lastWeekChartDiv" class="my-chart-div"></div>
   </div>
 
   <h2 class="font-title mt-8 text-3xl font-bold">Heatmap de preços</h2>
-  <div class="bg-midnight-light-200 mt-2 rounded-lg p-2">
+  <div
+    class="bg-midnight-light-200 mt-2 rounded-lg p-2"
+    :class="{
+      'flex items-center justify-center py-20': isPlotDataLoading,
+    }"
+  >
+    <loading-spinner class="size-10" v-if="isPlotDataLoading" />
     <div id="priceChartDiv" class="my-chart-div"></div>
   </div>
 
   <h2 class="font-title mt-8 text-3xl font-bold">Heatmap de quantidade</h2>
-  <div class="bg-midnight-light-200 mt-2 rounded-lg p-2">
+  <div
+    class="bg-midnight-light-200 mt-2 rounded-lg p-2"
+    :class="{
+      'flex items-center justify-center py-20': isPlotDataLoading,
+    }"
+  >
+    <loading-spinner class="size-10" v-if="isPlotDataLoading" />
     <div id="quantityChartDiv" class="my-chart-div"></div>
   </div>
 </template>

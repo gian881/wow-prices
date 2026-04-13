@@ -2,46 +2,33 @@
 import ItemOnHome from '@/components/item/ItemOnHome.vue'
 import { getTodayItems } from '@/services/api/endpoints/item'
 import { state as websocketState } from '@/services/websocketService'
-import type { TodayItem } from '@/types/item'
 import { isNotificationOn, toggleNotification } from '@/utils'
-import { onMounted, ref, watch } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { watch } from 'vue'
 
-const hoursAndItems = ref<TodayItem[]>([])
+const queryClient = useQueryClient()
 
-const isTodayItemsLoading = ref(false)
-const todayItemsError = ref<string | null>(null)
-
-async function fetchTodayItems() {
-  isTodayItemsLoading.value = true
-  todayItemsError.value = null
-
-  try {
-    hoursAndItems.value = await getTodayItems()
-  } catch (err) {
-    if (err instanceof Error) {
-      todayItemsError.value = err.message
-    } else {
-      todayItemsError.value = String(err)
-    }
-  } finally {
-    isTodayItemsLoading.value = false
-  }
-}
+const {
+  data: todayItems,
+  isLoading: isTodayItemsLoading,
+  isError,
+  error: todayItemsError,
+} = useQuery({
+  queryKey: ['todayItems'],
+  queryFn: getTodayItems,
+  staleTime: 1000 * 60 * 5, // 5 minutos
+})
 
 watch(
   () => websocketState.lastMessage,
   (newMessage) => {
     if (!newMessage) return
     if ('action' in newMessage && newMessage.action === 'new_data') {
-      fetchTodayItems()
+      queryClient.invalidateQueries({ queryKey: ['todayItems'] })
     }
   },
   { deep: true },
 )
-
-onMounted(() => {
-  fetchTodayItems()
-})
 </script>
 
 <template>
@@ -49,12 +36,12 @@ onMounted(() => {
     <h2 class="font-title text-3xl font-bold">Itens para vender hoje (preço médio)</h2>
 
     <div class="mt-4 text-center" v-if="isTodayItemsLoading">Carregando itens do dia...</div>
-    <div class="mt-4 text-center" v-if="todayItemsError">
+    <div class="mt-4 text-center" v-if="isError">
       Erro ao carregar itens do dia: {{ todayItemsError }}
     </div>
     <div class="mt-6 flex flex-col gap-8" v-if="!isTodayItemsLoading && !todayItemsError">
       <div
-        v-for="hour in hoursAndItems"
+        v-for="hour in todayItems"
         :key="hour.hour"
         class="bg-midnight-light-200 rounded-lg p-4 pb-6"
       >

@@ -31,15 +31,17 @@ import {
 import { editItem } from '@/services/api/endpoints/item'
 import type { Intent, Quality } from '@/types'
 import type { DetailedItem } from '@/types/item'
+import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
-const isOpen = defineModel('isOpen', { type: Boolean, default: false })
+const isOpen = ref(false)
 const props = defineProps<{
   item: DetailedItem
 }>()
 
+const queryClient = useQueryClient()
+
 const emit = defineEmits<{
-  'save-settings': []
   close: []
 }>()
 
@@ -81,7 +83,7 @@ async function onSaveSettings() {
   try {
     await editItem(props.item.id, updatedItem)
     isOpen.value = false
-    emit('save-settings')
+    queryClient.invalidateQueries({ queryKey: ['item', props.item.id] })
   } catch (err) {
     console.error('Erro ao salvar configurações:', err)
   }

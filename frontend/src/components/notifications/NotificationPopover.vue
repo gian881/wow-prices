@@ -7,7 +7,13 @@ import Popover from '@/components/ui/popover/Popover.vue'
 import PopoverContent from '@/components/ui/popover/PopoverContent.vue'
 import PopoverTrigger from '@/components/ui/popover/PopoverTrigger.vue'
 import { getNotifications, markAllNotificationsAsRead } from '@/services/api/endpoints/notification'
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
+import type { Notification } from '@/types/notifications'
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/vue-query'
 import { useIntersectionObserver } from '@vueuse/core'
 import { computed, ref, useTemplateRef } from 'vue'
 
@@ -45,7 +51,37 @@ useIntersectionObserver(loadRef, ([entry]) => {
 
 const { mutate: markAllNotificationsAsReadMutation } = useMutation({
   mutationFn: markAllNotificationsAsRead,
-  onSuccess: () => {
+  onMutate: async () => {
+    await queryClient.cancelQueries({ queryKey: ['notifications'] })
+    const previousData = queryClient.getQueryData(['notifications', showReadNotifications.value])
+    queryClient.setQueryData<InfiniteData<{ notifications: Notification[]; nextPage: number }>>(
+      ['notifications', showReadNotifications.value],
+      (oldData) => {
+        console.log('Updating notifications to read in cache')
+        console.log('Old data:', oldData)
+        if (!oldData) return oldData
+        const updatedPages = oldData.pages.map((page) => ({
+          ...page,
+          notifications: page.notifications.map((notification) => ({
+            ...notification,
+            read: true,
+          })),
+        }))
+
+        return { ...oldData, pages: updatedPages }
+      },
+    )
+
+    unreadNotificationsCount.value = 0
+
+    return { previousData }
+  },
+  onError: (__, _, context) => {
+    if (context?.previousData) {
+      queryClient.setQueryData(['notifications', showReadNotifications.value], context.previousData)
+    }
+  },
+  onSettled: () => {
     queryClient.invalidateQueries({ queryKey: ['notifications'] })
   },
 })
@@ -72,7 +108,7 @@ const { mutate: markAllNotificationsAsReadMutation } = useMutation({
     </popover-trigger>
     <popover-content
       as="div"
-      class="text-light-yellow relative mt-1 flex max-h-[calc(100vh-122px)] w-[436px] flex-col gap-4 overflow-x-hidden overflow-y-auto rounded-md border-none bg-[#252329] p-0 pb-4"
+      class="text-light-yellow relative mt-1 flex max-h-[calc(100vh-122px)] w-[436px] flex-col gap-4 overflow-x-hidden overflow-y-auto overscroll-y-contain rounded-md border-none bg-[#252329] p-0 pb-4"
       align="end"
       style="scrollbar-gutter: stable"
     >

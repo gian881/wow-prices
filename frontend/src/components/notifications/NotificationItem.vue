@@ -38,10 +38,12 @@ const { mutate: markAsRead, isPending } = useMutation({
   mutationFn: async (id: number) => {
     try {
       await markNotificationAsRead(id)
-      queryClient.invalidateQueries({ queryKey: ['notifications'] })
     } catch (error) {
       console.error('Failed to mark notification as read', error)
     }
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications'] })
   },
 })
 </script>
