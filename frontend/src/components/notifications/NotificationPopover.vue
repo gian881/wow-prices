@@ -57,8 +57,6 @@ const { mutate: markAllNotificationsAsReadMutation } = useMutation({
     queryClient.setQueryData<InfiniteData<{ notifications: Notification[]; nextPage: number }>>(
       ['notifications', showReadNotifications.value],
       (oldData) => {
-        console.log('Updating notifications to read in cache')
-        console.log('Old data:', oldData)
         if (!oldData) return oldData
         const updatedPages = oldData.pages.map((page) => ({
           ...page,
